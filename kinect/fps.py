@@ -1,5 +1,6 @@
 """Medidor de FPS (núcleo puro: o tempo entra como parâmetro)."""
 
+import math
 from collections import deque
 
 
@@ -19,8 +20,10 @@ class FpsMeter:
         """Registra o frame em ``t`` (segundos); ``None`` enquanto houver só um frame.
 
         Raises:
-            ValueError: se ``t`` não for estritamente crescente.
+            ValueError: se ``t`` não for finito ou não for estritamente crescente.
         """
+        if not math.isfinite(t):
+            raise ValueError(f"t deve ser finito: {t}")
         if self._times and t <= self._times[-1]:
             raise ValueError(f"t deve ser estritamente crescente: {t} <= {self._times[-1]}")
         self._times.append(t)

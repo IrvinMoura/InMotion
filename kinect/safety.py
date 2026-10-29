@@ -5,6 +5,7 @@ Núcleo puro: o tempo entra como parâmetro e o input sai por um ``InputBackend`
 
 import atexit
 import logging
+import math
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -141,8 +142,11 @@ class SafetyManager:
         flutuante. Antes da primeira pose, a referência é o primeiro frame recebido.
 
         Raises:
-            ValueError: se ``t`` não for estritamente crescente.
+            ValueError: se ``t`` não for finito (com NaN, toda comparação é falsa e a
+                perda nunca dispararia) ou não for estritamente crescente.
         """
+        if not math.isfinite(t):
+            raise ValueError(f"t deve ser finito: {t}")
         if self._last_t is not None and t <= self._last_t:
             raise ValueError(f"t deve ser estritamente crescente: {t} <= {self._last_t}")
         self._last_t = t

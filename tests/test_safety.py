@@ -1,5 +1,6 @@
 """Spec 001 — SafetyManager: nenhum caminho deixa input pressionado."""
 
+import math
 from collections.abc import Callable
 
 import pytest
@@ -220,6 +221,18 @@ def test_non_increasing_time_raises(t: float) -> None:
 
     with pytest.raises(ValueError, match="crescente"):
         manager.on_frame(t, tracking_ok=True)
+
+
+@pytest.mark.parametrize("bad_t", [math.nan, math.inf, -math.inf])
+def test_non_finite_time_raises(bad_t: float) -> None:
+    """Com t = NaN toda comparação é falsa: a perda de tracking nunca dispararia."""
+    manager, _ = make_manager()
+    with pytest.raises(ValueError, match="finito"):
+        manager.on_frame(bad_t, tracking_ok=False)
+
+    manager.on_frame(0.0, tracking_ok=True)
+    with pytest.raises(ValueError, match="finito"):
+        manager.on_frame(bad_t, tracking_ok=False)
 
 
 class CountingTrackedInput(TrackedInput):

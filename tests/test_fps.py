@@ -1,5 +1,7 @@
 """Spec 001 — medidor de FPS por janela deslizante (CA9)."""
 
+import math
+
 import pytest
 
 from kinect.fps import FpsMeter
@@ -40,3 +42,14 @@ def test_non_increasing_time_raises(t: float) -> None:
 
     with pytest.raises(ValueError, match="crescente"):
         meter.update(t)
+
+
+@pytest.mark.parametrize("bad_t", [math.nan, math.inf, -math.inf])
+def test_non_finite_time_raises(bad_t: float) -> None:
+    meter = FpsMeter()
+    with pytest.raises(ValueError, match="finito"):
+        meter.update(bad_t)
+
+    meter.update(0.0)
+    with pytest.raises(ValueError, match="finito"):
+        meter.update(bad_t)
