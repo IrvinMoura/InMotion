@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Callable
 
 import numpy as np
 import pytest
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from inmotion.vision.geometry import (
+    GeometryConfig,
     apply_h,
     from_pixels,
     mirror_matrix,
+    normalize_skeleton,
     rotation_matrix,
     scale_matrix,
     to_pixels,
     translation_matrix,
 )
+from inmotion.vision.landmarks import PoseLandmark
+from tests.fakes import make_pose
 
 PixelFn = Callable[[np.ndarray, int, int], np.ndarray]
 
@@ -124,3 +129,85 @@ def test_translation_rejects_non_finite(bad: float) -> None:
 def test_rotation_rejects_non_finite(bad: float) -> None:
     with pytest.raises(ValueError, match="theta"):
         rotation_matrix(bad)
+
+
+# ---------------------------------------------------------------- T3: A6 normalize_skeleton
+
+CFG = GeometryConfig()
+L_SH, R_SH = int(PoseLandmark.LEFT_SHOULDER), int(PoseLandmark.RIGHT_SHOULDER)
+L_HIP, R_HIP = int(PoseLandmark.LEFT_HIP), int(PoseLandmark.RIGHT_HIP)
+BIG = (4000, 4000)  # imagem grande: a semelhança aleatória não precisa caber nela
+
+
+def _torso(
+    ls: tuple[float, float],
+    rs: tuple[float, float],
+    lh: tuple[float, float],
+    rh: tuple[float, float],
+) -> dict[int, tuple[float, float]]:
+    return {L_SH: ls, R_SH: rs, L_HIP: lh, R_HIP: rh}
+
+
+def test_normalized_hips_at_origin_shoulders_unit_horizontal() -> None:
+    """G2: centro do quadril na origem e (ombro esq − ombro dir) = (1, 0)."""
+    pose = make_pose(_torso((400, 150), (240, 170), (380, 330), (260, 350)))
+    sk = normalize_skeleton(pose, CFG)
+    assert sk is not None
+    pts = sk.points
+    assert pts.shape == (33, 2)
+    np.testing.assert_allclose((pts[L_HIP] + pts[R_HIP]) / 2, [0.0, 0.0], atol=1e-12)
+    np.testing.assert_allclose(pts[L_SH] - pts[R_SH], [1.0, 0.0], atol=1e-12)
+    assert sk.shoulder_px == pytest.approx(math.hypot(160, -20))
+    np.testing.assert_allclose(apply_h(sk.matrix, pose.pixels()), pts, atol=1e-12)
+
+
+def test_degenerate_shoulders_return_none() -> None:
+    """CA3: ombros coincidentes ou estreitos, ou ombro/quadril invisível -> None."""
+    same = make_pose(_torso((300, 150), (300, 150), (380, 330), (260, 350)))
+    narrow = make_pose(_torso((305, 150), (300, 150), (380, 330), (260, 350)))
+    hidden = make_pose(
+        _torso((400, 150), (240, 170), (380, 330), (260, 350)), visibility={R_HIP: 0.2}
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert normalize_skeleton(same, CFG) is None
+        assert normalize_skeleton(narrow, CFG) is None
+        assert normalize_skeleton(hidden, CFG) is None
+
+
+def test_geometry_config_validation() -> None:
+    with pytest.raises(ValueError, match="visibility_threshold"):
+        GeometryConfig(visibility_threshold=1.5)
+    with pytest.raises(ValueError, match="min_shoulder_px"):
+        GeometryConfig(min_shoulder_px=0.0)
+
+
+_torso_xy = st.floats(min_value=100.0, max_value=300.0, allow_nan=False, allow_infinity=False)
+
+
+@given(
+    st.tuples(
+        _torso_xy, _torso_xy, _torso_xy, _torso_xy, _torso_xy, _torso_xy, _torso_xy, _torso_xy
+    ),
+    st.floats(min_value=-math.pi, max_value=math.pi),
+    st.floats(min_value=0.2, max_value=5.0),
+    st.floats(min_value=-500.0, max_value=500.0),
+    st.floats(min_value=-500.0, max_value=500.0),
+)
+def test_normalize_is_similarity_invariant(
+    c: tuple[float, ...], theta: float, k: float, dx: float, dy: float
+) -> None:
+    """G1: normalize(Sim(p)) == normalize(p) para Sim = T(d)·S(k)·R(θ) (sem reflexão)."""
+    ls, rs = (c[0], c[1]), (c[2], c[3])
+    # ombros largos o bastante, antes e depois da semelhança (min_shoulder_px = 10)
+    assume(min(1.0, k) * math.hypot(ls[0] - rs[0], ls[1] - rs[1]) >= 12.0)
+    base = _torso(ls, rs, (c[4], c[5]), (c[6], c[7]))
+    pose = make_pose(base, size=BIG)
+    sim = translation_matrix(dx, dy) @ scale_matrix(k) @ rotation_matrix(theta)
+    moved = apply_h(sim, pose.pixels())
+    pose2 = make_pose({i: (float(x), float(y)) for i, (x, y) in enumerate(moved)}, size=BIG)
+    a, b = normalize_skeleton(pose, CFG), normalize_skeleton(pose2, CFG)
+    assert a is not None
+    assert b is not None
+    np.testing.assert_allclose(b.points, a.points, atol=1e-9 * max(1.0, k) * 10)
+    assert b.shoulder_px == pytest.approx(k * a.shoulder_px, rel=1e-9)
