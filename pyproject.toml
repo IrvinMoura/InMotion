@@ -96,6 +96,7 @@ pretty = true
 [[tool.mypy.overrides]]
 module = [
     "kinect.vision.geometry",
+    "kinect.fps",
     "kinect.filters.*",
     "kinect.gestures.*",
     "kinect.safety",
