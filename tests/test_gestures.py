@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Sequence
+from typing import Literal
 
 import pytest
 from hypothesis import given, settings
@@ -234,6 +235,56 @@ def test_band_does_not_activate_from_idle() -> None:
     )
 
     assert kinds(feed(gesture, [0.5, 0.4, 0.6])) == [None, None, None]
+
+
+# ---------------------------------------------------------------------------
+# T4 — direção ABOVE por espelhamento do sinal
+# ---------------------------------------------------------------------------
+
+
+def test_above_activates_when_feature_exceeds_theta_on() -> None:
+    gesture = Gesture(
+        "g",
+        GestureKind.HOLD,
+        GestureParams(theta_on=0.6, theta_off=0.4, direction=Direction.ABOVE, debounce_frames=2),
+    )
+
+    out = feed(gesture, [0.5, 0.7, 0.7, 0.5, 0.39])
+
+    assert kinds(out) == [None, None, EventKind.START, None, EventKind.END]
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    params=gesture_params(),
+    values=st.lists(features, max_size=120),
+    steps=st.lists(st.floats(min_value=0.001, max_value=0.5), min_size=120, max_size=120),
+    kind=st.sampled_from([GestureKind.HOLD]),  # TRIGGER entra na T5
+)
+def test_above_mirrors_below(
+    params: GestureParams,
+    values: list[Feature],
+    steps: list[float],
+    kind: Literal[GestureKind.HOLD, GestureKind.TRIGGER],
+) -> None:
+    """ABOVE(θ_on, θ_off) com f ≡ BELOW(−θ_on, −θ_off) com −f: mesmos eventos e mesmos t."""
+    mirrored = GestureParams(
+        theta_on=-params.theta_on,
+        theta_off=-params.theta_off,
+        direction=Direction.ABOVE if params.direction is Direction.BELOW else Direction.BELOW,
+        debounce_frames=params.debounce_frames,
+        cooldown_s=params.cooldown_s,
+    )
+    original = Gesture("g", kind, params)
+    twin = Gesture("g", kind, mirrored)
+
+    t = 0.0
+    for v, step in zip(values, steps, strict=False):
+        t += step
+        a = original.update(v, t)
+        b = twin.update(None if v is None else -v, t)
+        assert a == b
+        assert original.snapshot().state is twin.snapshot().state
 
 
 # ---------------------------------------------------------------------------
