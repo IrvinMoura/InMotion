@@ -34,7 +34,7 @@ select = [
     "TID",      # imports banidos (regra de camadas, abaixo)
 ]
 # Símbolos matemáticos usados nas docstrings (notação do ROADMAP §5)
-allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "τ"]
+allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "τ", "∪"]
 
 # Regra de camadas: o núcleo é puro. Estes imports são proibidos por padrão
 # e liberados SÓ nos adaptadores listados em per-file-ignores.

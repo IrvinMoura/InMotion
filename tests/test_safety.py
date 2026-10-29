@@ -37,7 +37,6 @@ def press_then_raise(manager: SafetyManager, key: KeyName, exc: BaseException) -
 # --- TrackedInput.release_all (CA7, CA4b) ---------------------------------------
 
 
-@pending("T2")
 def test_release_all_empties_pressed() -> None:
     fake = FakeInputBackend()
     tracked = TrackedInput(fake, MOUSE_BUTTONS)
@@ -50,7 +49,6 @@ def test_release_all_empties_pressed() -> None:
     assert fake.pressed == set()
 
 
-@pending("T2")
 def test_release_all_twice_is_idempotent() -> None:
     fake = FakeInputBackend()
     tracked = TrackedInput(fake, MOUSE_BUTTONS)
@@ -64,7 +62,6 @@ def test_release_all_twice_is_idempotent() -> None:
     assert set(fake.released()) == MOUSE_BUTTONS
 
 
-@pending("T2")
 def test_release_all_continues_after_partial_failure() -> None:
     fake = FakeInputBackend(fail_on_release={"w"})
     tracked = TrackedInput(fake, MOUSE_BUTTONS)
@@ -77,6 +74,18 @@ def test_release_all_continues_after_partial_failure() -> None:
     assert {"space", "shift"} <= set(fake.released())
     assert fake.pressed == {"w"}
     assert tracked.pressed == frozenset({"w"})  # continua registrada: dá para tentar de novo
+
+
+def test_press_ignored_when_disabled() -> None:
+    fake = FakeInputBackend()
+    tracked = TrackedInput(fake, MOUSE_BUTTONS)
+    tracked.set_enabled(False)
+
+    tracked.press("space")
+
+    assert not tracked.enabled
+    assert tracked.pressed == frozenset()
+    assert fake.events == []
 
 
 # --- guard() (CA4, CA5) ------------------------------------------------------------
