@@ -16,18 +16,29 @@ Points2: TypeAlias = NDArray[np.float64]  # (N, 2)
 
 
 def translation_matrix(dx: float, dy: float) -> Matrix3:
-    """Translação T(dx, dy): ``[[1,0,dx],[0,1,dy],[0,0,1]]``. T(a)·T(b) = T(a+b)."""
+    """A6 (componente T): translação ``[[1,0,dx],[0,1,dy],[0,0,1]]`` de ``M = S·R·T``.
+
+    T(a)·T(b) = T(a+b). ``dx`` e ``dy`` devem ser finitos.
+    """
+    if not (math.isfinite(dx) and math.isfinite(dy)):
+        raise ValueError(f"dx e dy devem ser finitos, recebido ({dx}, {dy})")
     return np.array([[1.0, 0.0, dx], [0.0, 1.0, dy], [0.0, 0.0, 1.0]], dtype=np.float64)
 
 
 def rotation_matrix(theta: float) -> Matrix3:
-    """Rotação anti-horária R(θ) em radianos. R(α)·R(β) = R(α+β); R ortogonal, det 1."""
+    """A6 (componente R): rotação anti-horária de ``M = S·R·T``, ``θ`` em radianos.
+
+    ``R = [[cos θ, −sin θ, 0],[sin θ, cos θ, 0],[0,0,1]]``; R(α)·R(β) = R(α+β);
+    R ortogonal, det 1. ``theta`` deve ser finito.
+    """
+    if not math.isfinite(theta):
+        raise ValueError(f"theta deve ser finito, recebido {theta}")
     c, s = math.cos(theta), math.sin(theta)
     return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
 
 
 def scale_matrix(k: float) -> Matrix3:
-    """Escala uniforme S(k) = diag(k, k, 1), com k > 0 e finito."""
+    """A6 (componente S): escala uniforme ``S = diag(k, k, 1)`` de ``M = S·R·T``, k > 0 e finito."""
     if not math.isfinite(k) or k <= 0:
         raise ValueError(f"k deve ser finito e > 0, recebido {k}")
     return np.diag([k, k, 1.0]).astype(np.float64)

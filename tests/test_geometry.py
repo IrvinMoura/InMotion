@@ -110,3 +110,17 @@ def test_apply_h_rejects_bad_matrix_and_points() -> None:
         apply_h(np.eye(2), np.zeros((1, 2)))
     with pytest.raises(ValueError, match="forma"):
         apply_h(np.eye(3), np.zeros((1, 3)))
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_translation_rejects_non_finite(bad: float) -> None:
+    with pytest.raises(ValueError, match="dx e dy"):
+        translation_matrix(bad, 0.0)
+    with pytest.raises(ValueError, match="dx e dy"):
+        translation_matrix(0.0, bad)
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_rotation_rejects_non_finite(bad: float) -> None:
+    with pytest.raises(ValueError, match="theta"):
+        rotation_matrix(bad)
