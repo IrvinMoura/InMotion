@@ -171,9 +171,9 @@ class Gesture:
 
     def _activate(self, t: float) -> GestureEvent:
         self._state = GestureState.ACTIVE
-        if self._kind is GestureKind.HOLD:
-            return GestureEvent(self._name, EventKind.START, t)
-        raise NotImplementedError("TRIGGER: spec 007 T5")
+        # TRIGGER: um único PULSE; o período refratário é ACTIVE → COOLDOWN → IDLE (E4).
+        kind = EventKind.START if self._kind is GestureKind.HOLD else EventKind.PULSE
+        return GestureEvent(self._name, kind, t)
 
     def _deactivate(self, t: float) -> GestureEvent | None:
         self._state = GestureState.COOLDOWN

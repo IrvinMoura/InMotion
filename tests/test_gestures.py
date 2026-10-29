@@ -143,7 +143,6 @@ def test_hold_events_well_formed(
     assert len(events) % 2 == 0
 
 
-@xfail_t1
 @settings(max_examples=200, deadline=None)
 @given(
     values=st.lists(st.floats(min_value=-1.0, max_value=2.0), min_size=1, max_size=150),
@@ -259,7 +258,7 @@ def test_above_activates_when_feature_exceeds_theta_on() -> None:
     params=gesture_params(),
     values=st.lists(features, max_size=120),
     steps=st.lists(st.floats(min_value=0.001, max_value=0.5), min_size=120, max_size=120),
-    kind=st.sampled_from([GestureKind.HOLD]),  # TRIGGER entra na T5
+    kind=st.sampled_from([GestureKind.HOLD, GestureKind.TRIGGER]),
 )
 def test_above_mirrors_below(
     params: GestureParams,
@@ -285,6 +284,64 @@ def test_above_mirrors_below(
         b = twin.update(None if v is None else -v, t)
         assert a == b
         assert original.snapshot().state is twin.snapshot().state
+
+
+# ---------------------------------------------------------------------------
+# T5 — TRIGGER e COOLDOWN
+# ---------------------------------------------------------------------------
+
+
+def test_trigger_needs_return_to_idle() -> None:
+    """RF3: pose mantida (ou na banda) dá um único PULSE; só dispara de novo após soltar."""
+    gesture = Gesture(
+        "g", GestureKind.TRIGGER, GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=1)
+    )
+
+    held = feed(gesture, [0.0, 0.0, 0.5, 0.0, 0.0])  # nunca passou de θ_off
+    assert kinds(held) == [EventKind.PULSE, None, None, None, None]
+
+    released = feed(gesture, [0.7, 0.0], t0=1.0)  # soltou (> θ_off) e voltou
+    assert kinds(released) == [None, EventKind.PULSE]
+
+
+def test_trigger_never_emits_end() -> None:
+    gesture = Gesture(
+        "g", GestureKind.TRIGGER, GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=1)
+    )
+
+    out = feed(gesture, [0.0, 1.0, 0.0, 1.0, None])
+
+    assert set(kinds(out)) == {None, EventKind.PULSE}
+    assert gesture.close(9.0) is None
+
+
+def test_cooldown_blocks_reactivation_until_elapsed() -> None:
+    """RF2: em COOLDOWN, ativar só após t − t_end ≥ T_cd, reavaliando f no mesmo frame."""
+    params = GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=1, cooldown_s=0.5)
+    gesture = Gesture("g", GestureKind.TRIGGER, params)
+
+    assert gesture.update(0.0, 0.0) is not None  # PULSE em t = 0
+    assert gesture.update(1.0, 0.1) is None  # saiu: COOLDOWN, t_end = 0.1
+    assert gesture.update(0.0, 0.3) is None  # 0,2 s < T_cd: ignorado
+    assert gesture.snapshot().state is GestureState.COOLDOWN
+    assert gesture.update(0.0, 0.5) is None  # 0,4 s < T_cd
+    event = gesture.update(0.0, 0.6)  # 0,5 s ≥ T_cd: IDLE e reavalia f no mesmo frame
+    assert event is not None
+    assert (event.kind, event.t) == (EventKind.PULSE, 0.6)
+
+
+def test_hold_with_cooldown_delays_restart() -> None:
+    params = GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=1, cooldown_s=1.0)
+    gesture = Gesture("g", GestureKind.HOLD, params)
+
+    assert gesture.update(0.0, 0.0) is not None  # START
+    end = gesture.update(1.0, 1.0)  # END, t_end = 1,0
+    assert end is not None
+    assert end.kind is EventKind.END
+    assert gesture.update(0.0, 1.5) is None
+    event = gesture.update(0.0, 2.0)
+    assert event is not None
+    assert event.kind is EventKind.START
 
 
 # ---------------------------------------------------------------------------
