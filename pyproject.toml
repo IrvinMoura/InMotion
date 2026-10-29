@@ -32,6 +32,7 @@ select = [
     "NPY",      # numpy
     "RUF",      # regras do ruff
     "TID",      # imports banidos (regra de camadas, abaixo)
+    "T20",      # sem print: usar logging (spec 002, CA6)
 ]
 # Símbolos matemáticos usados nas docstrings (notação do ROADMAP §5)
 allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "τ", "∪"]
@@ -51,6 +52,7 @@ allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "�
 # Adaptadores e composição: podem usar I/O e bibliotecas externas.
 "inmotion/__main__.py" = ["TID251"]
 "inmotion/app.py" = ["TID251"]
+"inmotion/clock.py" = ["TID251"]  # único lugar do núcleo que lê o relógio
 "inmotion/capture/**" = ["TID251"]
 "inmotion/vision/pose.py" = ["TID251"]
 "inmotion/vision/preprocess.py" = ["TID251"]
@@ -59,7 +61,7 @@ allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "�
 "inmotion/overlay.py" = ["TID251"]
 "inmotion/recorder.py" = ["TID251"]
 "tools/**" = ["TID251"]
-"tests/**" = ["TID251"]
+"tests/**" = ["TID251", "T20"]  # T20: testes de hardware imprimem medições
 
 [tool.ruff.format]
 quote-style = "double"
@@ -95,7 +97,13 @@ pretty = true
 # as flags estão explícitas). Todo módulo puro novo entra nesta lista.
 [[tool.mypy.overrides]]
 module = [
+    "inmotion.types",
+    "inmotion.ports",
+    "inmotion.pipeline",
+    "inmotion.watchdog",
+    "inmotion.vision.landmarks",
     "inmotion.vision.geometry",
+    "inmotion.vision.kernels",
     "inmotion.fps",
     "inmotion.filters.*",
     "inmotion.gestures.*",
