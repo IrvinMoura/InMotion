@@ -275,3 +275,27 @@ def test_non_finite_time_raises(factory: FilterFactory) -> None:
     f = factory()
     with pytest.raises(ValueError, match="t"):
         f.update(1.0, float("nan"))
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+@given(
+    seq=st.lists(
+        st.lists(_values, min_size=9, max_size=9),
+        min_size=1,
+        max_size=15,
+    )
+)
+def test_vectorized_equals_scalar(factory: FilterFactory, seq: list[list[float]]) -> None:
+    """CA6: o filtro em bloco (33, 3) é igual a um filtro escalar por elemento."""
+    vec = factory()
+    scalars = [factory() for _ in range(33 * 3)]
+    rng = np.random.default_rng(0)
+    base = rng.uniform(-1.0, 1.0, size=(33, 3))
+    for n, vals in enumerate(seq):
+        t = n * DT
+        x = base + np.resize(np.array(vals), (33, 3))
+        out = vec.update(x, t)
+        expected = np.array(
+            [scalars[i].update(float(x.flat[i]), t) for i in range(33 * 3)]
+        ).reshape(33, 3)
+        np.testing.assert_allclose(out, expected, rtol=0, atol=1e-12)
