@@ -3,6 +3,8 @@
 from collections.abc import Callable
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from kinect.input.backend import MOUSE_BUTTONS, KeyName
 from kinect.safety import (
@@ -222,6 +224,65 @@ def test_non_increasing_time_raises(t: float) -> None:
 
     with pytest.raises(ValueError, match="crescente"):
         manager.on_frame(t, tracking_ok=True)
+
+
+class CountingTrackedInput(TrackedInput):
+    """Conta as chamadas de release_all() feitas pelo SafetyManager."""
+
+    def __init__(self, backend: FakeInputBackend) -> None:
+        super().__init__(backend, MOUSE_BUTTONS)
+        self.release_all_calls = 0
+
+    def release_all(self) -> None:
+        self.release_all_calls += 1
+        super().release_all()
+
+
+def long_loss_runs(times: list[float], oks: list[bool], timeout: float) -> int:
+    """Oráculo ingênuo de S2': trechos maximais sem pose com duração ≥ T.
+
+    A duração de um trecho é medida a partir do último frame com pose antes dele (ou do
+    primeiro frame da sequência, se ainda não houve pose) até o último frame do trecho.
+    """
+    count = 0
+    i = 0
+    while i < len(oks):
+        if oks[i]:
+            i += 1
+            continue
+        start = i
+        while i < len(oks) and not oks[i]:
+            i += 1
+        reference = times[start - 1] if start > 0 else times[0]
+        if times[i - 1] - reference >= timeout:
+            count += 1
+    return count
+
+
+frames = st.lists(
+    st.tuples(st.floats(min_value=0.001, max_value=0.15), st.booleans()),
+    min_size=1,
+    max_size=80,
+)
+
+
+@given(frames)
+def test_release_count_matches_long_loss_runs(sequence: list[tuple[float, bool]]) -> None:
+    fake = FakeInputBackend()
+    tracked = CountingTrackedInput(fake)
+    config = SafetyConfig()
+    manager = SafetyManager(tracked, config)
+    times: list[float] = []
+    t = 0.0
+    for dt, _ in sequence:
+        t += dt
+        times.append(t)
+    oks = [ok for _, ok in sequence]
+
+    for t_n, ok in zip(times, oks, strict=True):
+        manager.on_frame(t_n, tracking_ok=ok)
+
+    assert tracked.release_all_calls == long_loss_runs(times, oks, config.lost_timeout_s)
 
 
 # --- Pausa F8 (CA6) ------------------------------------------------------------------
