@@ -5,34 +5,31 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
+import numpy as np
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from inmotion.filters import TemporalFilter
 from inmotion.filters.ema import Ema, EmaParams
-from inmotion.filters.one_euro import OneEuro, OneEuroParams
+from inmotion.filters.one_euro import OneEuro, OneEuroParams, smoothing_factor
 
 DT = 1.0 / 30.0
 _values = st.floats(min_value=-1e3, max_value=1e3, allow_nan=False, allow_infinity=False)
 _alphas = st.floats(min_value=0.01, max_value=1.0)
 
 FilterFactory = Callable[[], TemporalFilter]
-XFAIL_STUB = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="stub")
 XFAIL_NO_RAISE = pytest.mark.xfail(strict=True, raises=pytest.fail.Exception, reason="T4")
 FACTORIES: list[FilterFactory] = [
     lambda: Ema(EmaParams()),
     lambda: OneEuro(OneEuroParams()),
 ]
 FACTORY_IDS = ["ema", "one_euro"]
-# Filtros ainda sem implementação (T3) ou ainda sem validação de Δt (T4).
-RANGE_PARAMS = [
-    pytest.param(FACTORIES[0], id="ema"),
-    pytest.param(FACTORIES[1], id="one_euro", marks=XFAIL_STUB),
-]
+# A EMA ainda não valida Δt (T4).
+RANGE_PARAMS = [pytest.param(f, id=i) for f, i in zip(FACTORIES, FACTORY_IDS)]
 DT_PARAMS = [
     pytest.param(FACTORIES[0], id="ema", marks=XFAIL_NO_RAISE),
-    pytest.param(FACTORIES[1], id="one_euro", marks=XFAIL_STUB),
+    pytest.param(FACTORIES[1], id="one_euro"),
 ]
 
 
@@ -69,7 +66,6 @@ def test_output_within_input_range(factory: FilterFactory, xs: list[float]) -> N
         assert min(xs[: n + 1]) - 1e-9 <= s <= max(xs[: n + 1]) + 1e-9
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="stub da T1")
 @given(
     xs=st.lists(_values, min_size=2, max_size=40),
     min_cutoff=st.floats(min_value=0.1, max_value=10.0),
@@ -140,3 +136,53 @@ def test_ema_params_validation() -> None:
     for bad in (0.0, -1.0, float("nan")):
         with pytest.raises(ValueError, match="gap_max_s"):
             EmaParams(gap_max_s=bad)
+
+
+@given(
+    cutoff=st.floats(min_value=1e-3, max_value=1e3),
+    dt=st.floats(min_value=1e-4, max_value=10.0),
+)
+def test_smoothing_factor_in_open_unit_interval(cutoff: float, dt: float) -> None:
+    """F1: α = 1/(1 + τ/Δt), τ = 1/(2π·f_c), está em (0, 1) para Δt > 0, f_c > 0."""
+    alpha = smoothing_factor(cutoff, dt)
+    assert isinstance(alpha, float)
+    assert 0.0 < alpha < 1.0
+    tau = 1.0 / (2.0 * math.pi * cutoff)
+    assert alpha == pytest.approx(1.0 / (1.0 + tau / dt), rel=1e-12)
+
+
+def test_smoothing_factor_accepts_arrays_and_rejects_invalid() -> None:
+    """Aceita array de cortes (devolve array); Δt ≤ 0 ou f_c ≤ 0 levanta ValueError."""
+    out = smoothing_factor(np.array([0.5, 1.0, 2.0]), DT)
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (3,)
+    assert np.all(np.diff(out) > 0)  # corte maior -> α maior
+    with pytest.raises(ValueError, match="dt"):
+        smoothing_factor(1.0, 0.0)
+    with pytest.raises(ValueError, match="cutoff"):
+        smoothing_factor(0.0, DT)
+
+
+def test_one_euro_adapts_cutoff_to_speed() -> None:
+    """R4: com β > 0, um degrau rápido faz o filtro seguir mais depressa que com β = 0."""
+    slow = OneEuro(OneEuroParams(beta=0.0))
+    fast = OneEuro(OneEuroParams(beta=5.0))
+    for f in (slow, fast):
+        f.update(0.0, 0.0)
+    a = b = 0.0
+    for k in range(1, 6):
+        a = float(slow.update(10.0, k * DT))
+        b = float(fast.update(10.0, k * DT))
+    assert b > a
+
+
+def test_one_euro_params_validation() -> None:
+    """min_cutoff > 0, beta ≥ 0, d_cutoff > 0, gap_max_s > 0."""
+    with pytest.raises(ValueError, match="min_cutoff"):
+        OneEuroParams(min_cutoff=0.0)
+    with pytest.raises(ValueError, match="beta"):
+        OneEuroParams(beta=-0.1)
+    with pytest.raises(ValueError, match="d_cutoff"):
+        OneEuroParams(d_cutoff=0.0)
+    with pytest.raises(ValueError, match="gap_max_s"):
+        OneEuroParams(gap_max_s=0.0)
