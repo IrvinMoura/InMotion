@@ -64,3 +64,13 @@ class FakeDirectInput:
 
     def mouseUp(self, *, button: str) -> None:  # noqa: N802
         self.calls.append(("mouseUp", button))
+
+
+class FakeUser32:
+    """Imita user32.GetAsyncKeyState: devolve o valor configurado para cada código VK."""
+
+    def __init__(self, states: dict[int, int] | None = None) -> None:
+        self.states = states or {}
+
+    def GetAsyncKeyState(self, vk: int) -> int:  # noqa: N802 - nome da API do Windows
+        return self.states.get(vk, 0)
