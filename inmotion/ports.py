@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
 from inmotion.types import FramePacket, PoseFrame
+
+if TYPE_CHECKING:
+    from inmotion.pipeline import StepResult
 
 
 class Clock(Protocol):
@@ -30,5 +33,15 @@ class PoseEstimator(Protocol):
     """Estimador de pose: imagem BGR -> PoseFrame, ou None se não achar ninguém."""
 
     def estimate(self, image_bgr: NDArray[np.uint8], t: float) -> PoseFrame | None: ...
+
+    def close(self) -> None: ...
+
+
+class Display(Protocol):
+    """Janela de exibição: mostra a imagem com o resultado do passo."""
+
+    def show(self, image: NDArray[np.uint8], result: StepResult) -> bool:
+        """Mostra o frame; devolve False quando o usuário pede para sair."""
+        ...
 
     def close(self) -> None: ...
