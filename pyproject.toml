@@ -1,0 +1,120 @@
+# Configuração das ferramentas do KinectProject.
+# Dependências ficam em requirements.txt / requirements-dev.txt (versões fixas).
+
+[project]
+name = "kinect"
+version = "0.0.0"
+description = "Controle de jogos por visão computacional com uma webcam (Projeto A3)."
+requires-python = ">=3.10,<3.11"  # ver GUIA_CLAUDE §9: upgrade só via ADR
+
+# ---------------------------------------------------------------------------
+# Ruff — lint + format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = [".", "tests"]
+# Protótipo legado: substituído pelo pacote kinect/ (specs 002 e 008).
+# Fica fora do lint para não poluir o DoD; não editar, só remover.
+extend-exclude = ["main.py", "PoseModule.py", "actions/"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "UP",       # pyupgrade (até py310)
+    "B",        # bugbear
+    "SIM",      # simplificações
+    "C4",       # comprehensions
+    "PT",       # estilo pytest
+    "NPY",      # numpy
+    "RUF",      # regras do ruff
+    "TID",      # imports banidos (regra de camadas, abaixo)
+]
+# Símbolos matemáticos usados nas docstrings (notação do ROADMAP §5)
+allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "τ"]
+
+# Regra de camadas: o núcleo é puro. Estes imports são proibidos por padrão
+# e liberados SÓ nos adaptadores listados em per-file-ignores.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"cv2".msg = "Núcleo puro: cv2 só em adaptadores (CLAUDE.md > Camadas)."
+"mediapipe".msg = "Núcleo puro: mediapipe só no adaptador de pose (CLAUDE.md > Camadas)."
+"pydirectinput".msg = "Núcleo puro: pydirectinput só no backend de input (CLAUDE.md > Camadas)."
+"vgamepad".msg = "Núcleo puro: vgamepad só no backend de gamepad (CLAUDE.md > Camadas)."
+"time.time".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
+"time.monotonic".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
+"time.perf_counter".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
+
+[tool.ruff.lint.per-file-ignores]
+# Adaptadores e composição: podem usar I/O e bibliotecas externas.
+"kinect/__main__.py" = ["TID251"]
+"kinect/app.py" = ["TID251"]
+"kinect/capture/**" = ["TID251"]
+"kinect/vision/pose.py" = ["TID251"]
+"kinect/vision/preprocess.py" = ["TID251"]
+"kinect/input/keyboard_mouse.py" = ["TID251"]
+"kinect/input/gamepad.py" = ["TID251"]
+"kinect/overlay.py" = ["TID251"]
+"kinect/recorder.py" = ["TID251"]
+"tools/**" = ["TID251"]
+"tests/**" = ["TID251"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+# hardware nunca roda por padrão; slow roda (use -m "not slow" para pular)
+addopts = ["-ra", "--strict-markers", "--strict-config", "-m", "not hardware"]
+markers = [
+    "hardware: precisa de webcam e/ou injeção de input no Windows (rodar com -m hardware)",
+    "slow: teste demorado (replay longo, hypothesis com muitos exemplos)",
+]
+xfail_strict = true
+
+# ---------------------------------------------------------------------------
+# mypy — estrito só no núcleo
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+files = ["kinect"]
+warn_unused_configs = true
+warn_redundant_casts = true
+show_error_codes = true
+pretty = true
+
+# Núcleo: equivalente a --strict (a opção `strict` não vale por módulo, por isso
+# as flags estão explícitas). Todo módulo puro novo entra nesta lista.
+[[tool.mypy.overrides]]
+module = [
+    "kinect.vision.geometry",
+    "kinect.filters.*",
+    "kinect.gestures.*",
+    "kinect.safety",
+    "kinect.calibration",
+    "kinect.input.backend",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+check_untyped_defs = true
+no_implicit_reexport = true
+strict_equality = true
+warn_return_any = true
+warn_unused_ignores = true
+
+# Bibliotecas sem stubs
+[[tool.mypy.overrides]]
+module = ["pydirectinput.*", "mediapipe.*", "vgamepad.*"]
+ignore_missing_imports = true

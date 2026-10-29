@@ -1,0 +1,55 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Ambientes virtuais ---
+.venv/
+venv/
+env/
+
+# --- Ferramentas ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- IDEs / SO ---
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- Claude Code (config pessoal; o CLAUDE.md é versionado) ---
+.claude/settings.local.json
+
+# --- Dados gerados em runtime ---
+profiles/
+recordings/
+logs/
+
+# --- Modelos MediaPipe (.task são baixados, não versionados) ---
+models/*.task
+
+# --- Mídia e dados pesados ---
+*.mp4
+*.avi
+*.mov
+*.mkv
+# Gravações de landmarks são ignoradas, exceto as fixtures curtas de teste
+*.npz
+!tests/fixtures/**/*.npz
+
+# --- Documentos de trabalho locais (fora do repositório) ---
+CLAUDE.md
+.claude/
+docs/
+specs/
+ROADMAP.md

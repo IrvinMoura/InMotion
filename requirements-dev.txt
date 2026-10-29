@@ -1,0 +1,10 @@
+# Ferramentas de desenvolvimento (testes, lint, tipos).
+# Instalar: pip install -r requirements-dev.txt
+-r requirements.txt
+
+# PENDENTE: ainda não instaladas no .venv, por isso sem versão fixa.
+# Depois de instalar, fixar com as versões de `pip freeze`.
+pytest>=8.0
+hypothesis
+ruff
+mypy
