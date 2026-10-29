@@ -37,3 +37,30 @@ class FakeHotkeys:
 
     def poll(self) -> frozenset[str]:
         return self._script.pop(0) if self._script else frozenset()
+
+
+class FakeDirectInput:
+    """Imita a API do pydirectinput usada pelo backend (sem enviar input real)."""
+
+    def __init__(self) -> None:
+        self.PAUSE = 0.1
+        self.FAILSAFE = True
+        self.KEYBOARD_MAPPING: dict[str, int | None] = {
+            "space": 57,
+            "shift": 42,
+            "w": 17,
+            "f13": None,  # existe no dicionário do pydirectinput, mas sem scancode
+        }
+        self.calls: list[tuple[str, str]] = []
+
+    def keyDown(self, key: str) -> None:  # noqa: N802 - nome da API real
+        self.calls.append(("keyDown", key))
+
+    def keyUp(self, key: str) -> None:  # noqa: N802
+        self.calls.append(("keyUp", key))
+
+    def mouseDown(self, *, button: str) -> None:  # noqa: N802
+        self.calls.append(("mouseDown", button))
+
+    def mouseUp(self, *, button: str) -> None:  # noqa: N802
+        self.calls.append(("mouseUp", button))
