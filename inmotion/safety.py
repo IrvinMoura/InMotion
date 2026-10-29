@@ -143,13 +143,16 @@ class SafetyManager:
         self._lost = False
         self._paused = False
         self._previous_keys: frozenset[KeyName] = frozenset()
+        # Reentrante: o watchdog chama ``on_stall`` de outra thread.
+        self._lock = threading.RLock()
 
     @property
     def state(self) -> SafetyState:
         """PAUSED tem prioridade sobre LOST."""
-        if self._paused:
-            return SafetyState.PAUSED
-        return SafetyState.LOST if self._lost else SafetyState.ACTIVE
+        with self._lock:
+            if self._paused:
+                return SafetyState.PAUSED
+            return SafetyState.LOST if self._lost else SafetyState.ACTIVE
 
     @property
     def input(self) -> TrackedInput:
@@ -170,20 +173,28 @@ class SafetyManager:
         """
         if not math.isfinite(t):
             raise ValueError(f"t deve ser finito: {t}")
-        if self._last_t is not None and t <= self._last_t:
-            raise ValueError(f"t deve ser estritamente crescente: {t} <= {self._last_t}")
-        self._last_t = t
+        with self._lock:
+            if self._last_t is not None and t <= self._last_t:
+                raise ValueError(f"t deve ser estritamente crescente: {t} <= {self._last_t}")
+            self._last_t = t
 
-        if tracking_ok:
-            self._last_ok_t = t
-            if self._lost:
-                self._lost = False
-                self._sync_enabled()
-            return
+            if tracking_ok:
+                self._last_ok_t = t
+                if self._lost:
+                    self._lost = False
+                    self._sync_enabled()
+                return
 
-        if self._last_ok_t is None:
-            self._last_ok_t = t
-        if not self._lost and t - self._last_ok_t >= self._config.lost_timeout_s:
+            if self._last_ok_t is None:
+                self._last_ok_t = t
+            if not self._lost and t - self._last_ok_t >= self._config.lost_timeout_s:
+                self._lost = True
+                self._sync_enabled()  # antes de soltar: nenhum press entra no meio
+                self._tracked.release_all()
+
+    def on_stall(self) -> None:
+        """Loop travado (watchdog): solta tudo e desabilita até o próximo ``on_frame``."""
+        with self._lock:
             self._lost = True
             self._sync_enabled()  # antes de soltar: nenhum press entra no meio
             self._tracked.release_all()
@@ -194,16 +205,17 @@ class SafetyManager:
         Borda de ``pause_key``: alterna a pausa (S3: nº de alternâncias = nº de bordas);
         ao pausar, solta tudo. Borda de ``exit_key``: devolve ``SafetyAction.EXIT``.
         """
-        rising = keys - self._previous_keys
-        self._previous_keys = keys
+        with self._lock:
+            rising = keys - self._previous_keys
+            self._previous_keys = keys
 
-        if self._config.pause_key in rising:
-            self._paused = not self._paused
-            self._sync_enabled()
-            if self._paused:
-                self._tracked.release_all()
+            if self._config.pause_key in rising:
+                self._paused = not self._paused
+                self._sync_enabled()
+                if self._paused:
+                    self._tracked.release_all()
 
-        return SafetyAction.EXIT if self._config.exit_key in rising else SafetyAction.NONE
+            return SafetyAction.EXIT if self._config.exit_key in rising else SafetyAction.NONE
 
     def _sync_enabled(self) -> None:
         """Input só é aceito em ACTIVE: nem pausado (S5), nem sem pose."""
@@ -220,12 +232,14 @@ class SafetyManager:
             yield self
         except BaseException:
             try:
-                self._tracked.release_all()
+                with self._lock:
+                    self._tracked.release_all()
             except Exception:
                 _log.exception("release_all() falhou durante o tratamento de outra exceção")
             raise
         else:
-            self._tracked.release_all()
+            with self._lock:
+                self._tracked.release_all()
 
 
 def register_atexit(

@@ -409,3 +409,59 @@ def test_tracked_input_exposes_always_release() -> None:
     tracked = TrackedInput(FakeInputBackend(), MOUSE_BUTTONS)
 
     assert tracked.always_release == MOUSE_BUTTONS
+
+
+# ---------------------------------------------------------------------------
+# Spec 002 T6 — on_stall (watchdog) e acesso de outra thread
+# ---------------------------------------------------------------------------
+
+
+def test_on_stall_releases_and_next_frame_recovers() -> None:
+    manager, fake = make_manager()
+    manager.on_frame(0.0, True)
+    manager.input.press("w")
+    manager.on_stall()
+    assert "w" in fake.released()
+    assert manager.input.pressed == frozenset()
+    assert not manager.input.enabled
+    manager.input.press("w")  # ignorado enquanto travado
+    assert manager.input.pressed == frozenset()
+    manager.on_frame(1.0, True)
+    assert manager.input.enabled
+    manager.input.press("w")
+    assert manager.input.pressed == frozenset({"w"})
+
+
+def test_on_stall_from_other_thread() -> None:
+    import threading
+
+    manager, fake = make_manager()
+    started = threading.Event()
+    errors: list[BaseException] = []
+
+    def loop() -> None:
+        try:
+            for n in range(1, 3001):
+                manager.on_frame(n * 0.001, True)
+                manager.input.press("w")
+                manager.input.release("w")
+                manager.input.press("space")
+                started.set()
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=loop, daemon=True)
+    worker.start()
+    try:
+        assert started.wait(timeout=2.0)
+        for _ in range(200):
+            manager.on_stall()
+    finally:
+        worker.join(timeout=5.0)
+    assert not worker.is_alive()
+    assert errors == []
+    # Com o loop encerrado, o último on_stall deixa tudo solto e desabilitado.
+    manager.on_stall()
+    assert manager.input.pressed == frozenset()
+    assert fake.pressed == set()
+    assert not manager.input.enabled
