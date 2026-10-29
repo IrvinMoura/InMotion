@@ -18,6 +18,16 @@ _log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SafetyConfig:
+    """Parâmetros de segurança (os padrões migram para ``config/default.yaml`` na spec 004).
+
+    Attributes:
+        lost_timeout_s: tempo sem pose, em segundos, até soltar tudo (``T`` da R5 temporal).
+        pause_key: tecla global que alterna a pausa.
+        exit_key: tecla global que pede a saída.
+        always_release: soltas em todo ``release_all()``, mesmo fora de P. Quem monta o
+            sistema deve passar este mesmo valor ao ``TrackedInput``.
+    """
+
     lost_timeout_s: float = 0.2
     pause_key: KeyName = "f8"
     exit_key: KeyName = "f9"
