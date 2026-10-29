@@ -17,8 +17,6 @@ from inmotion.recording import (
 )
 from tests.fakes import make_pose
 
-_TDD = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 011 T1")
-
 
 def make_meta(schema_version: int = SCHEMA_VERSION) -> RecordingMeta:
     return RecordingMeta(
@@ -32,7 +30,6 @@ def make_meta(schema_version: int = SCHEMA_VERSION) -> RecordingMeta:
     )
 
 
-@_TDD
 def test_save_load_roundtrip(tmp_path: Path) -> None:
     meta = make_meta()
     rec = Recorder(meta, (640, 480))
@@ -58,9 +55,43 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     assert loaded.landmarks[2, 0, 1] == pytest.approx(110.0 / 480.0)
 
 
-@_TDD
 def test_incompatible_schema_raises(tmp_path: Path) -> None:
     path = tmp_path / "futuro.npz"
     np.savez_compressed(path, meta_json=np.array(json.dumps({"schema_version": 99})))
     with pytest.raises(RecordingFormatError, match="99"):
         load_recording(path)
+
+
+def test_corrupt_or_incomplete_file_raises(tmp_path: Path) -> None:
+    lixo = tmp_path / "lixo.npz"
+    lixo.write_bytes(b"isto nao e um zip")
+    with pytest.raises(RecordingFormatError):
+        load_recording(lixo)
+
+    sem_meta = tmp_path / "sem_meta.npz"
+    np.savez_compressed(sem_meta, t=np.zeros(1))
+    with pytest.raises(RecordingFormatError, match="meta_json"):
+        load_recording(sem_meta)
+
+    sem_versao = tmp_path / "sem_versao.npz"
+    np.savez_compressed(sem_versao, meta_json=np.array(json.dumps({"meta": {}})))
+    with pytest.raises(RecordingFormatError, match="schema_version"):
+        load_recording(sem_versao)
+
+    sem_arrays = tmp_path / "sem_arrays.npz"
+    np.savez_compressed(
+        sem_arrays, meta_json=np.array(json.dumps({"schema_version": SCHEMA_VERSION}))
+    )
+    with pytest.raises(RecordingFormatError):
+        load_recording(sem_arrays)
+
+
+def test_save_appends_npz_suffix_and_rejects_size_mismatch(tmp_path: Path) -> None:
+    rec = Recorder(make_meta(), (640, 480))
+    rec.add(0.0, make_pose({}, size=(640, 480)))
+    with pytest.raises(ValueError, match="image_size"):
+        rec.add(0.1, make_pose({}, size=(320, 240)))
+    path = rec.save(tmp_path / "sessao", [])
+    assert path.name == "sessao.npz"
+    assert path.exists()
+    assert load_recording(path).t.shape == (1,)
