@@ -12,11 +12,14 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from inmotion.vision.geometry import (
+    ArmExtension,
     GeometryConfig,
     NormalizedSkeleton,
     apply_h,
+    arm_extension,
     distance,
     from_pixels,
+    is_visible,
     joint_angle,
     mirror_matrix,
     normalize_skeleton,
@@ -26,7 +29,7 @@ from inmotion.vision.geometry import (
     translation_matrix,
     trunk_lean,
 )
-from inmotion.vision.landmarks import PoseLandmark
+from inmotion.vision.landmarks import PoseLandmark, Side
 from tests.fakes import make_pose
 
 PixelFn = Callable[[np.ndarray, int, int], np.ndarray]
@@ -305,3 +308,76 @@ def test_trunk_lean_includes_rigid_tilt() -> None:
     assert sk0 is not None
     # R(θ) leva (0, −1) a (sin θ, −cos θ): o tronco inclina +θ para a direita da imagem
     assert trunk_lean(sk) - trunk_lean(sk0) == pytest.approx(0.3, abs=1e-9)
+
+
+# ---------------------------------------------------------------- T5: gate e arm_extension
+
+L_EL, L_WR = int(PoseLandmark.LEFT_ELBOW), int(PoseLandmark.LEFT_WRIST)
+
+
+def _world(
+    shoulder: tuple[float, float, float],
+    elbow: tuple[float, float, float],
+    wrist: tuple[float, float, float],
+) -> np.ndarray:
+    """World landmarks (33, 4) em metros; só o braço esquerdo importa."""
+    w = np.zeros((33, 4), dtype=np.float64)
+    w[L_SH, :3], w[L_EL, :3], w[L_WR, :3] = shoulder, elbow, wrist
+    return w
+
+
+# braço esticado para frente: pulso à frente do ombro (z menor) e cotovelo reto
+_EXTENDED = _world((0.0, 0.0, 0.0), (0.0, 0.0, -0.3), (0.0, 0.0, -0.6))
+# braço dobrado para baixo: cotovelo a 90° e pulso abaixo, sem avançar
+_BENT_DOWN = _world((0.0, 0.0, 0.0), (0.0, 0.3, 0.0), (0.0, 0.3, 0.3))
+_ARM_PX = {L_SH: (300.0, 150.0), L_EL: (300.0, 250.0), L_WR: (400.0, 250.0)}
+
+
+def test_is_visible_uses_threshold_inclusive() -> None:
+    pose = make_pose(_ARM_PX, visibility={L_WR: 0.6, L_EL: 0.59})
+    assert is_visible(pose, [L_SH, L_WR], 0.6)
+    assert not is_visible(pose, [L_SH, L_EL, L_WR], 0.6)
+
+
+def test_low_visibility_invalidates_feature() -> None:
+    """CA4: visibilidade 0,3 em ombro, cotovelo ou pulso -> None."""
+    for idx in (L_SH, L_EL, L_WR):
+        pose = make_pose(_ARM_PX, visibility={idx: 0.3}, world=_EXTENDED)
+        assert arm_extension(pose, Side.LEFT, CFG) is None
+    assert arm_extension(make_pose(_ARM_PX, world=_EXTENDED), Side.LEFT, CFG) is not None
+
+
+def test_extended_arm_reaches_pi_with_negative_depth() -> None:
+    ext = arm_extension(make_pose(_ARM_PX, world=_EXTENDED), Side.LEFT, CFG)
+    assert ext is not None
+    assert ext.elbow_angle == pytest.approx(math.pi, abs=1e-6)
+    assert ext.depth_m == pytest.approx(-0.6)
+
+
+def test_bent_down_arm_is_not_extended() -> None:
+    """CA6: cotovelo ~90° e pulso abaixo -> longe de π e depth_m >= 0."""
+    ext = arm_extension(make_pose(_ARM_PX, world=_BENT_DOWN), Side.LEFT, CFG)
+    assert ext is not None
+    assert ext.elbow_angle == pytest.approx(math.pi / 2)
+    assert math.pi - ext.elbow_angle > 1.0
+    assert ext.depth_m is not None
+    assert ext.depth_m >= 0.0
+
+
+def test_arm_extension_without_world_uses_2d() -> None:
+    """Sem world: ângulo 2D em pixels e depth_m = None."""
+    ext = arm_extension(make_pose(_ARM_PX), Side.LEFT, CFG)
+    assert ext == ArmExtension(elbow_angle=pytest.approx(math.pi / 2), depth_m=None)  # type: ignore[arg-type]
+
+
+def test_arm_extension_side_and_degenerate() -> None:
+    right = {
+        int(PoseLandmark.RIGHT_SHOULDER): (300.0, 150.0),
+        int(PoseLandmark.RIGHT_ELBOW): (300.0, 250.0),
+        int(PoseLandmark.RIGHT_WRIST): (300.0, 350.0),
+    }
+    ext = arm_extension(make_pose(right), Side.RIGHT, CFG)
+    assert ext is not None
+    assert ext.elbow_angle == pytest.approx(math.pi)
+    same = {L_SH: (300.0, 150.0), L_EL: (300.0, 150.0), L_WR: (400.0, 250.0)}
+    assert arm_extension(make_pose(same), Side.LEFT, CFG) is None

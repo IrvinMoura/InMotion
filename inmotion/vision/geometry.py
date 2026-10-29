@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from inmotion.types import PoseFrame
-from inmotion.vision.landmarks import PoseLandmark
+from inmotion.vision.landmarks import PoseLandmark, Side
 
 Matrix3: TypeAlias = NDArray[np.float64]  # (3, 3) homogênea
 Points2: TypeAlias = NDArray[np.float64]  # (N, 2)
@@ -200,3 +200,44 @@ def _check_points(points: Points2) -> Points2:
 def _check_size(width: int, height: int) -> None:
     if width <= 0 or height <= 0:
         raise ValueError(f"width e height devem ser > 0, recebido {width}x{height}")
+
+
+@dataclass(frozen=True)
+class ArmExtension:
+    """Extensão do braço: ângulo do cotovelo (rad, ``π`` = reto) e profundidade (m) ou ``None``."""
+
+    elbow_angle: float
+    depth_m: float | None
+
+
+_ARM: dict[Side, tuple[PoseLandmark, PoseLandmark, PoseLandmark]] = {
+    Side.LEFT: (PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_ELBOW, PoseLandmark.LEFT_WRIST),
+    Side.RIGHT: (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST),
+}
+
+
+def arm_extension(pose: PoseFrame, side: Side, config: GeometryConfig) -> ArmExtension | None:
+    """A7 + A8: extensão do braço do lado ``side``.
+
+    Ângulo do cotovelo ``θ = joint_angle(ombro, cotovelo, pulso)``: em 3D com os world
+    landmarks (metros) ou, se ``pose.world`` for ``None``, em 2D nos pixels (A5).
+    Profundidade ``depth_m = z_pulso − z_ombro`` (world; negativo = à frente do ombro),
+    ``None`` sem world. Devolve ``None`` se ombro, cotovelo ou pulso estiverem abaixo do
+    limiar de visibilidade ou se o braço for degenerado (pontos coincidentes).
+    """
+    sh, el, wr = _ARM[side]
+    if not is_visible(pose, (sh, el, wr), config.visibility_threshold):
+        return None
+    world = pose.world
+    depth: float | None
+    if world is None:
+        pts = pose.pixels()
+        depth = None
+    else:
+        pts = world[:, :3]
+        depth = float(world[wr, 2] - world[sh, 2])
+    try:
+        theta = joint_angle(pts[sh], pts[el], pts[wr])
+    except ValueError:
+        return None
+    return ArmExtension(elbow_angle=theta, depth_m=depth)
