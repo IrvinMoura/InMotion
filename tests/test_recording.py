@@ -16,8 +16,6 @@ from inmotion.recording import (
     RecordingMeta,
 )
 
-_TDD = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 011 T1")
-
 
 def make_meta() -> RecordingMeta:
     return RecordingMeta(
@@ -45,7 +43,6 @@ def make_recording(n: int = 5, **overrides: Any) -> Recording:
     return Recording(**kwargs)
 
 
-@_TDD
 def test_recording_validates_shapes_and_time() -> None:
     rec = make_recording(5)
     assert rec.duration_s == pytest.approx(4 / 30.0)
@@ -70,7 +67,6 @@ def test_recording_validates_shapes_and_time() -> None:
         make_recording(5, image_size=(0, 480))
 
 
-@_TDD
 def test_label_tracker_builds_intervals() -> None:
     tracker = LabelTracker({"1": "attack", "2": "jump"})
     none: frozenset[str] = frozenset()
@@ -87,7 +83,6 @@ def test_label_tracker_builds_intervals() -> None:
     )
 
 
-@_TDD
 def test_poses_yield_none_when_absent() -> None:
     present = np.array([True, False, True])
     landmarks = np.full((3, 33, 5), 0.5)
