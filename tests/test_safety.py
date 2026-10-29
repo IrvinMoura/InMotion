@@ -161,7 +161,6 @@ def test_register_atexit_callback_releases_all() -> None:
 # --- Perda de tracking (CA1, CA2) --------------------------------------------------
 
 
-@pending("T4")
 def test_lost_tracking_for_timeout_releases_all() -> None:
     manager, fake = make_manager()
     manager.on_frame(0.0, tracking_ok=True)
@@ -175,7 +174,6 @@ def test_lost_tracking_for_timeout_releases_all() -> None:
     assert manager.state is SafetyState.LOST
 
 
-@pending("T4")
 def test_short_tracking_loss_keeps_keys() -> None:
     manager, fake = make_manager()
     manager.on_frame(0.0, tracking_ok=True)
@@ -188,6 +186,42 @@ def test_short_tracking_loss_keeps_keys() -> None:
     assert fake.pressed == {"space"}
     assert fake.released() == []
     assert manager.state is SafetyState.ACTIVE
+
+
+def test_tracking_recovery_reenables_input() -> None:
+    manager, fake = make_manager()
+    manager.on_frame(0.0, tracking_ok=True)
+    manager.on_frame(0.3, tracking_ok=False)
+
+    manager.input.press("w")
+    assert fake.pressed == set()  # LOST: press ignorado
+
+    manager.on_frame(0.4, tracking_ok=True)
+    manager.input.press("w")
+
+    assert manager.state is SafetyState.ACTIVE
+    assert fake.pressed == {"w"}
+
+
+def test_loss_from_first_frame_counts_from_it() -> None:
+    manager, fake = make_manager()
+    manager.input.press("mouse_left")
+
+    manager.on_frame(0.0, tracking_ok=False)
+    manager.on_frame(0.1, tracking_ok=False)
+    assert fake.pressed == {"mouse_left"}
+
+    manager.on_frame(0.25, tracking_ok=False)
+    assert fake.pressed == set()
+
+
+@pytest.mark.parametrize("t", [0.5, 0.4])
+def test_non_increasing_time_raises(t: float) -> None:
+    manager, _ = make_manager()
+    manager.on_frame(0.5, tracking_ok=True)
+
+    with pytest.raises(ValueError, match="crescente"):
+        manager.on_frame(t, tracking_ok=True)
 
 
 # --- Pausa F8 (CA6) ------------------------------------------------------------------

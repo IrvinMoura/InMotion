@@ -104,10 +104,13 @@ class SafetyManager:
     def __init__(self, tracked: TrackedInput, config: SafetyConfig) -> None:
         self._tracked = tracked
         self._config = config
+        self._last_t: float | None = None
+        self._last_ok_t: float | None = None
+        self._lost = False
 
     @property
     def state(self) -> SafetyState:
-        raise NotImplementedError
+        return SafetyState.LOST if self._lost else SafetyState.ACTIVE
 
     @property
     def input(self) -> TrackedInput:
@@ -115,7 +118,33 @@ class SafetyManager:
         return self._tracked
 
     def on_frame(self, t: float, tracking_ok: bool) -> None:
-        raise NotImplementedError
+        """R5 temporal: solta tudo quando o tempo sem pose atinge ``lost_timeout_s``.
+
+        Recorrência da spec: ``L₀ = 0``, ``Lₙ = ℓₙ·(Lₙ₋₁ + Δtₙ)``, com disparo quando
+        ``Lₙ₋₁ < T ≤ Lₙ``. Pela propriedade S1', ``Lₙ = tₙ − t_ok`` (tempo desde o último
+        frame com pose), que é o que se calcula aqui, sem acumular erro de ponto
+        flutuante. Antes da primeira pose, a referência é o primeiro frame recebido.
+
+        Raises:
+            ValueError: se ``t`` não for estritamente crescente.
+        """
+        if self._last_t is not None and t <= self._last_t:
+            raise ValueError(f"t deve ser estritamente crescente: {t} <= {self._last_t}")
+        self._last_t = t
+
+        if tracking_ok:
+            self._last_ok_t = t
+            if self._lost:
+                self._lost = False
+                self._tracked.set_enabled(True)
+            return
+
+        if self._last_ok_t is None:
+            self._last_ok_t = t
+        if not self._lost and t - self._last_ok_t >= self._config.lost_timeout_s:
+            self._lost = True
+            self._tracked.set_enabled(False)  # antes de soltar: nenhum press entra no meio
+            self._tracked.release_all()
 
     def on_hotkeys(self, keys: frozenset[KeyName]) -> SafetyAction:
         raise NotImplementedError
