@@ -19,18 +19,14 @@ _values = st.floats(min_value=-1e3, max_value=1e3, allow_nan=False, allow_infini
 _alphas = st.floats(min_value=0.01, max_value=1.0)
 
 FilterFactory = Callable[[], TemporalFilter]
-XFAIL_NO_RAISE = pytest.mark.xfail(strict=True, raises=pytest.fail.Exception, reason="T4")
+
 FACTORIES: list[FilterFactory] = [
     lambda: Ema(EmaParams()),
     lambda: OneEuro(OneEuroParams()),
 ]
 FACTORY_IDS = ["ema", "one_euro"]
-# A EMA ainda não valida Δt (T4).
-RANGE_PARAMS = [pytest.param(f, id=i) for f, i in zip(FACTORIES, FACTORY_IDS)]
-DT_PARAMS = [
-    pytest.param(FACTORIES[0], id="ema", marks=XFAIL_NO_RAISE),
-    pytest.param(FACTORIES[1], id="one_euro"),
-]
+RANGE_PARAMS = [pytest.param(f, id=i) for f, i in zip(FACTORIES, FACTORY_IDS, strict=True)]
+DT_PARAMS = RANGE_PARAMS
 
 
 def closed_form_ema(xs: list[float], alpha: float) -> float:
@@ -186,3 +182,96 @@ def test_one_euro_params_validation() -> None:
         OneEuroParams(d_cutoff=0.0)
     with pytest.raises(ValueError, match="gap_max_s"):
         OneEuroParams(gap_max_s=0.0)
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_nan_does_not_contaminate_state(factory: FilterFactory) -> None:
+    """CA5: NaN por elemento mantém o estado daquele elemento e devolve o último valor."""
+    f = factory()
+    f.update(np.array([1.0, 2.0, 3.0]), 0.0)
+    before = f.update(np.array([1.5, 2.5, 3.5]), DT)
+    out = f.update(np.array([np.nan, 9.0, np.nan]), 2 * DT)
+    assert out[0] == before[0]
+    assert out[2] == before[2]
+    assert np.isfinite(out).all()
+    assert out[1] != before[1]
+    # Depois do NaN, o filtro continua finito e no fecho convexo dos valores válidos.
+    nxt = f.update(np.array([1.5, 9.0, 3.5]), 3 * DT)
+    assert np.isfinite(nxt).all()
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_nan_before_first_valid_sample_returns_nan(factory: FilterFactory) -> None:
+    """Sem valor filtrado ainda, NaN devolve NaN; a primeira amostra válida vira s0."""
+    f = factory()
+    assert np.isnan(f.update(np.nan, 0.0))
+    assert float(f.update(7.0, DT)) == 7.0
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_dt_is_measured_against_last_valid_sample(factory: FilterFactory) -> None:
+    """Δt de um elemento é medido contra a última amostra VÁLIDA dele, pulando os NaN."""
+    with_nan, without_nan = factory(), factory()
+    with_nan.update(0.0, 0.0)
+    without_nan.update(0.0, 0.0)
+    with_nan.update(np.nan, 0.1)
+    a = with_nan.update(5.0, 0.2)
+    b = without_nan.update(5.0, 0.2)
+    assert float(a) == pytest.approx(float(b), abs=1e-12)
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_all_nan_call_still_checks_time_order(factory: FilterFactory) -> None:
+    """O tempo da chamada anterior vale mesmo se ela só tinha NaN."""
+    f = factory()
+    f.update(1.0, 1.0)
+    f.update(np.nan, 1.1)
+    with pytest.raises(ValueError, match="dt"):
+        f.update(2.0, 1.05)
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_gap_resets_filter(factory: FilterFactory) -> None:
+    """CA5: lacuna > gap_max_s (0,3 s) reinicia: a amostra seguinte vira o novo s0."""
+    f = factory()
+    f.update(0.0, 0.0)
+    f.update(10.0, 0.1)
+    assert float(f.update(100.0, 0.1 + 0.3 + 0.01)) == 100.0
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_gap_within_limit_does_not_reset(factory: FilterFactory) -> None:
+    """Lacuna <= gap_max_s não reinicia: a saída continua suavizada."""
+    f = factory()
+    f.update(0.0, 0.0)
+    out = float(f.update(100.0, 0.25))
+    assert 0.0 < out < 100.0
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_gap_after_nan_resets_element(factory: FilterFactory) -> None:
+    """A lacuna conta desde a última amostra válida: NaN longo seguido de valor reinicia."""
+    f = factory()
+    f.update(0.0, 0.0)
+    f.update(np.nan, 0.2)
+    f.update(np.nan, 0.4)
+    assert float(f.update(50.0, 0.5)) == 50.0
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_shape_change_without_reset_raises(factory: FilterFactory) -> None:
+    """Mudar a forma entre chamadas sem reset() levanta ValueError; após reset(), vale."""
+    f = factory()
+    f.update(np.zeros(3), 0.0)
+    with pytest.raises(ValueError, match="forma"):
+        f.update(np.zeros(4), DT)
+    f.reset()
+    assert f.update(np.zeros(4), 2 * DT).shape == (4,)
+
+
+@pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+def test_non_finite_time_raises(factory: FilterFactory) -> None:
+    """Tempo NaN/inf é inválido."""
+    f = factory()
+    with pytest.raises(ValueError, match="t"):
+        f.update(1.0, float("nan"))
