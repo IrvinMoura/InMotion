@@ -395,3 +395,17 @@ def test_config_rejects_same_pause_and_exit_key() -> None:
 def test_config_rejects_empty_key(field: str) -> None:
     with pytest.raises(ValueError, match=field):
         SafetyConfig(**{field: ""})
+
+
+def test_manager_rejects_always_release_mismatch() -> None:
+    """always_release tem uma fonte só: a config tem de bater com o TrackedInput."""
+    tracked = TrackedInput(FakeInputBackend(), always_release=frozenset())
+
+    with pytest.raises(ValueError, match="always_release"):
+        SafetyManager(tracked, SafetyConfig())
+
+
+def test_tracked_input_exposes_always_release() -> None:
+    tracked = TrackedInput(FakeInputBackend(), MOUSE_BUTTONS)
+
+    assert tracked.always_release == MOUSE_BUTTONS

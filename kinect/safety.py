@@ -25,8 +25,8 @@ class SafetyConfig:
         lost_timeout_s: tempo sem pose, em segundos, até soltar tudo (``T`` da R5 temporal).
         pause_key: tecla global que alterna a pausa.
         exit_key: tecla global que pede a saída.
-        always_release: soltas em todo ``release_all()``, mesmo fora de P. Quem monta o
-            sistema deve passar este mesmo valor ao ``TrackedInput``.
+        always_release: soltas em todo ``release_all()``, mesmo fora de P. Tem de ser o
+            mesmo valor do ``TrackedInput``; o ``SafetyManager`` confere na construção.
     """
 
     lost_timeout_s: float = 0.2
@@ -76,6 +76,10 @@ class TrackedInput:
             return frozenset(self._pressed)
 
     @property
+    def always_release(self) -> frozenset[KeyName]:
+        return self._always_release
+
+    @property
     def enabled(self) -> bool:
         return self._enabled
 
@@ -122,6 +126,16 @@ class SafetyManager:
     """Política de segurança: perda de tracking, pausa, saída e exceções."""
 
     def __init__(self, tracked: TrackedInput, config: SafetyConfig) -> None:
+        """Monta a política sobre um ``TrackedInput`` já criado.
+
+        Raises:
+            ValueError: se ``tracked.always_release`` diferir de ``config.always_release``.
+        """
+        if tracked.always_release != config.always_release:
+            raise ValueError(
+                "always_release do TrackedInput difere do SafetyConfig: "
+                f"{sorted(tracked.always_release)} != {sorted(config.always_release)}"
+            )
         self._tracked = tracked
         self._config = config
         self._last_t: float | None = None
