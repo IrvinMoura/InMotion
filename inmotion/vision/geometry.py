@@ -141,6 +141,49 @@ def normalize_skeleton(pose: PoseFrame, config: GeometryConfig) -> NormalizedSke
     return NormalizedSkeleton(points=apply_h(m, px), matrix=m, shoulder_px=s)
 
 
+def joint_angle(a: NDArray[np.float64], b: NDArray[np.float64], c: NDArray[np.float64]) -> float:
+    """A7: ângulo em ``b``, ``θ = arccos(clip(u·v / (‖u‖‖v‖), −1, 1))``, ``u = a−b``, ``v = c−b``.
+
+    Funciona em 2D ou 3D (os três pontos com a mesma forma). Resultado em ``[0, π]`` e
+    simétrico: ``θ(a, b, c) = θ(c, b, a)``. ``π`` = articulação reta.
+    Vetor nulo (``a == b`` ou ``c == b``) deixa o ângulo indefinido: ``ValueError``.
+    """
+    pa, pb, pc = (np.asarray(x, dtype=np.float64) for x in (a, b, c))
+    if not (pa.shape == pb.shape == pc.shape) or pa.ndim != 1 or pa.shape[0] not in (2, 3):
+        raise ValueError(
+            "a, b, c devem ter a mesma forma (2,) ou (3,), "
+            f"recebido {pa.shape}, {pb.shape}, {pc.shape}"
+        )
+    u, v = pa - pb, pc - pb
+    nu, nv = float(np.linalg.norm(u)), float(np.linalg.norm(v))
+    if nu == 0.0 or nv == 0.0:
+        raise ValueError("vetor nulo: ângulo indefinido quando a == b ou c == b")
+    cosine = float(np.dot(u, v)) / (nu * nv)
+    return float(np.arccos(np.clip(cosine, -1.0, 1.0)))
+
+
+def distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
+    """A8: distância euclidiana ``‖a − b‖₂`` (2D ou 3D)."""
+    diff = np.asarray(a, dtype=np.float64) - np.asarray(b, dtype=np.float64)
+    return float(np.linalg.norm(diff))
+
+
+def trunk_lean(skeleton: NormalizedSkeleton) -> float:
+    """A9: inclinação do tronco, ângulo com sinal de ``(ombro − quadril)`` com ``(0, −1)``.
+
+    ``w`` = centro dos ombros − centro do quadril, em pontos normalizados. Como ``M`` alinha
+    os ombros ao eixo x, desfaz-se a parte linear ``A`` de ``M`` (``w_px = A⁻¹·w``) para medir
+    a inclinação no plano da imagem; então ``lean = atan2(w_px.x, −w_px.y)``, em rad.
+    Sinal: 0 = ereto; positivo = ombros deslocados para a direita da imagem (lado esquerdo
+    da pessoa; nada é espelhado, ADR 0007); negativo = para a esquerda da imagem.
+    """
+    pts = skeleton.points
+    shoulders = (pts[PoseLandmark.LEFT_SHOULDER] + pts[PoseLandmark.RIGHT_SHOULDER]) / 2.0
+    hips = (pts[PoseLandmark.LEFT_HIP] + pts[PoseLandmark.RIGHT_HIP]) / 2.0
+    w = np.linalg.solve(skeleton.matrix[:2, :2], shoulders - hips)
+    return math.atan2(float(w[0]), -float(w[1]))
+
+
 def is_visible(pose: PoseFrame, indices: Sequence[int], threshold: float) -> bool:
     """Gate de visibilidade: todos os ``indices`` têm ``visibility >= threshold``."""
     vis = pose.landmarks[list(indices), 3]

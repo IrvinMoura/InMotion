@@ -13,14 +13,18 @@ from hypothesis import strategies as st
 
 from inmotion.vision.geometry import (
     GeometryConfig,
+    NormalizedSkeleton,
     apply_h,
+    distance,
     from_pixels,
+    joint_angle,
     mirror_matrix,
     normalize_skeleton,
     rotation_matrix,
     scale_matrix,
     to_pixels,
     translation_matrix,
+    trunk_lean,
 )
 from inmotion.vision.landmarks import PoseLandmark
 from tests.fakes import make_pose
@@ -211,3 +215,93 @@ def test_normalize_is_similarity_invariant(
     assert b is not None
     np.testing.assert_allclose(b.points, a.points, atol=1e-9 * max(1.0, k) * 10)
     assert b.shoulder_px == pytest.approx(k * a.shoulder_px, rel=1e-9)
+
+
+# ---------------------------------------------------------------- T4: A7-A9
+
+
+def test_joint_angle_known_values() -> None:
+    """A7: 90°, 180° e 0° (2D e 3D)."""
+    b = np.array([0.0, 0.0])
+    assert joint_angle(np.array([1.0, 0.0]), b, np.array([0.0, 1.0])) == pytest.approx(math.pi / 2)
+    assert joint_angle(np.array([1.0, 0.0]), b, np.array([-2.0, 0.0])) == pytest.approx(math.pi)
+    assert joint_angle(np.array([1.0, 0.0]), b, np.array([3.0, 0.0])) == pytest.approx(
+        0.0, abs=1e-7
+    )
+    b3 = np.array([1.0, 1.0, 1.0])
+    a3, c3 = b3 + np.array([1.0, 0.0, 0.0]), b3 + np.array([0.0, 0.0, 5.0])
+    assert joint_angle(a3, b3, c3) == pytest.approx(math.pi / 2)
+
+
+def test_joint_angle_zero_vector_raises() -> None:
+    """Vetor nulo (a == b ou c == b) é indefinido: ValueError."""
+    p = np.array([1.0, 2.0])
+    with pytest.raises(ValueError, match="nulo"):
+        joint_angle(p, p, np.array([3.0, 4.0]))
+    with pytest.raises(ValueError, match="nulo"):
+        joint_angle(np.array([3.0, 4.0]), p, p)
+
+
+def test_joint_angle_shape_mismatch_raises() -> None:
+    with pytest.raises(ValueError, match="forma"):
+        joint_angle(np.zeros(2), np.zeros(3), np.zeros(2))
+
+
+_vec3 = st.tuples(coord, coord, coord).map(lambda t: np.array(t, dtype=np.float64))
+
+
+@given(_vec3, _vec3, _vec3)
+def test_joint_angle_symmetric_and_bounded(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> None:
+    """A7: θ(a,b,c) = θ(c,b,a) e θ ∈ [0, π]."""
+    assume(np.linalg.norm(a - b) > 1e-3 and np.linalg.norm(c - b) > 1e-3)
+    theta = joint_angle(a, b, c)
+    assert 0.0 <= theta <= math.pi
+    assert theta == pytest.approx(joint_angle(c, b, a), abs=1e-12)
+
+
+def test_distance_known_values() -> None:
+    """A8: norma euclidiana, simétrica."""
+    a, b = np.array([0.0, 0.0, 0.0]), np.array([1.0, 2.0, 2.0])
+    assert distance(a, b) == pytest.approx(3.0)
+    assert distance(b, a) == pytest.approx(3.0)
+    assert distance(a, a) == 0.0
+
+
+def _lean_skeleton(shoulder_mid_x: float) -> NormalizedSkeleton:
+    """Pessoa de frente com os ombros deslocados em x (px) em relação ao quadril."""
+    pose = make_pose(
+        _torso(
+            (shoulder_mid_x + 80, 150),
+            (shoulder_mid_x - 80, 150),
+            (380, 350),
+            (260, 350),
+        )
+    )
+    sk = normalize_skeleton(pose, CFG)
+    assert sk is not None
+    return sk
+
+
+def test_trunk_lean_sign() -> None:
+    """A9: ereto = 0; ombros à direita da imagem > 0; à esquerda < 0; simétrico."""
+    upright = trunk_lean(_lean_skeleton(320))
+    right = trunk_lean(_lean_skeleton(420))
+    left = trunk_lean(_lean_skeleton(220))
+    assert upright == pytest.approx(0.0, abs=1e-12)
+    assert right > 0.0 > left
+    assert right == pytest.approx(-left)
+    assert right == pytest.approx(math.atan2(100, 200))
+
+
+def test_trunk_lean_includes_rigid_tilt() -> None:
+    """Rotação rígida do tronco no plano da imagem entra na inclinação (A9 em px)."""
+    base = make_pose(_torso((400, 150), (240, 150), (380, 350), (260, 350)))
+    tilt = rotation_matrix(0.3)
+    moved = apply_h(tilt, base.pixels())
+    pose = make_pose({i: (float(x), float(y)) for i, (x, y) in enumerate(moved)}, size=(640, 480))
+    sk = normalize_skeleton(pose, CFG)
+    sk0 = normalize_skeleton(base, CFG)
+    assert sk is not None
+    assert sk0 is not None
+    # R(θ) leva (0, −1) a (sin θ, −cos θ): o tronco inclina +θ para a direita da imagem
+    assert trunk_lean(sk) - trunk_lean(sk0) == pytest.approx(0.3, abs=1e-9)
