@@ -1,7 +1,12 @@
 """Spec 001 — backend de teclado e mouse sobre o pydirectinput (CA8)."""
 
+import statistics
+import sys
+import time
+
 import pytest
 
+from kinect.input.hotkeys import WindowsHotkeys
 from kinect.input.keyboard_mouse import KeyboardMouseBackend
 from tests.fakes import FakeDirectInput
 
@@ -49,3 +54,55 @@ def test_unknown_key_raises(key: str) -> None:
     with pytest.raises(ValueError, match=key):
         backend.release(key)
     assert api.calls == []
+
+
+# --- Hardware (rodar com `pytest -m hardware`; enviam input real ao Windows) ----------
+
+# Scroll Lock alterna um LED: os testes sempre dão um número PAR de toques, para que o
+# estado volte ao original. Shift (Teclas de Aderência) e Ctrl (atalhos de duplo toque)
+# foram evitados de propósito.
+HARMLESS_KEY = "scrolllock"
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="input real só no Windows")
+
+
+def tap(backend: KeyboardMouseBackend, hotkeys: WindowsHotkeys) -> tuple[bool, bool]:
+    """Aperta e solta a tecla; devolve (vista pressionada, vista solta) pelo SO."""
+    try:
+        backend.press(HARMLESS_KEY)
+        down = HARMLESS_KEY in hotkeys.poll()
+    finally:
+        backend.release(HARMLESS_KEY)
+    up = HARMLESS_KEY not in hotkeys.poll()
+    return down, up
+
+
+@pytest.mark.hardware
+@windows_only
+def test_real_press_release_roundtrip() -> None:
+    backend = KeyboardMouseBackend()
+    hotkeys = WindowsHotkeys(frozenset({HARMLESS_KEY}))
+
+    results = [tap(backend, hotkeys) for _ in range(2)]
+
+    assert results == [(True, True), (True, True)]
+
+
+@pytest.mark.hardware
+@windows_only
+def test_press_release_latency_p95() -> None:
+    """RNF2 / CA12: cada chamada de press/release leva < 5 ms (p95)."""
+    backend = KeyboardMouseBackend()
+    durations_ms: list[float] = []
+    for _ in range(100):  # 100 pares: número par de toques
+        try:
+            start = time.perf_counter()
+            backend.press(HARMLESS_KEY)
+            durations_ms.append((time.perf_counter() - start) * 1000)
+        finally:
+            start = time.perf_counter()
+            backend.release(HARMLESS_KEY)
+            durations_ms.append((time.perf_counter() - start) * 1000)
+
+    p95 = statistics.quantiles(durations_ms, n=20)[-1]
+    print(f"latência press/release: p95 = {p95:.3f} ms, máx = {max(durations_ms):.3f} ms")
+    assert p95 < 5.0
