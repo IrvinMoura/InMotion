@@ -34,6 +34,15 @@ class SafetyConfig:
     exit_key: KeyName = "f9"
     always_release: frozenset[KeyName] = MOUSE_BUTTONS
 
+    def __post_init__(self) -> None:
+        if not (math.isfinite(self.lost_timeout_s) and self.lost_timeout_s > 0):
+            raise ValueError(f"lost_timeout_s deve ser finito e > 0: {self.lost_timeout_s}")
+        for field in ("pause_key", "exit_key"):
+            if not getattr(self, field):
+                raise ValueError(f"{field} não pode ser vazio")
+        if self.pause_key == self.exit_key:
+            raise ValueError(f"pause_key e exit_key devem ser diferentes: {self.pause_key!r}")
+
 
 class SafetyState(Enum):
     ACTIVE = auto()

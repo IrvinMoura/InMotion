@@ -375,3 +375,23 @@ def test_toggle_count_equals_rising_edges(f8_held: list[bool]) -> None:
     pairs = zip([False, *f8_held], f8_held, strict=False)
     rising_edges = sum(1 for prev, cur in pairs if cur and not prev)
     assert toggles == rising_edges
+
+
+# --- Validação do SafetyConfig --------------------------------------------------------
+
+
+@pytest.mark.parametrize("timeout", [0.0, -0.1, math.nan, math.inf])
+def test_config_rejects_invalid_timeout(timeout: float) -> None:
+    with pytest.raises(ValueError, match="lost_timeout_s"):
+        SafetyConfig(lost_timeout_s=timeout)
+
+
+def test_config_rejects_same_pause_and_exit_key() -> None:
+    with pytest.raises(ValueError, match="f8"):
+        SafetyConfig(pause_key="f8", exit_key="f8")
+
+
+@pytest.mark.parametrize("field", ["pause_key", "exit_key"])
+def test_config_rejects_empty_key(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        SafetyConfig(**{field: ""})
