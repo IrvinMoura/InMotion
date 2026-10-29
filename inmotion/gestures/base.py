@@ -224,14 +224,43 @@ class Gesture:
 
 
 class AnalogGesture:
+    """Gesto analógico: um VALUE por frame, com zona morta e ganho (RF3, CA5).
+
+    Saída y = 0 se x é None/não finito ou |x| ≤ zona morta; senão y = ganho · x.
+    Não tem estados de histerese; o `state` do snapshot é ACTIVE fora da zona morta.
+    """
+
     def __init__(self, name: str, params: AnalogParams) -> None:
-        raise NotImplementedError
+        self._name = name
+        self._params = params
+        self._last: float | None = None
+        self._out = 0.0
 
     def update(self, x: float | None, t: float) -> GestureEvent:
-        raise NotImplementedError
+        """Emite sempre um VALUE com a saída analógica do frame."""
+        if x is not None and not math.isfinite(x):
+            x = None
+        self._last = x
+        if x is None or abs(x) <= self._params.dead_zone:
+            self._out = 0.0
+        else:
+            self._out = self._params.gain * x
+        return GestureEvent(self._name, EventKind.VALUE, t, value=self._out)
 
     def reset(self) -> None:
-        raise NotImplementedError
+        """Volta ao estado inicial (saída 0), sem evento."""
+        self._last = None
+        self._out = 0.0
 
     def snapshot(self) -> GestureSnapshot:
-        raise NotImplementedError
+        """Estado para o overlay; os limiares são a zona morta e a confiança é min(|y|, 1)."""
+        return GestureSnapshot(
+            name=self._name,
+            kind=GestureKind.ANALOG,
+            state=GestureState.ACTIVE if self._out != 0.0 else GestureState.IDLE,
+            counter=0,
+            last_value=self._last,
+            theta_on=self._params.dead_zone,
+            theta_off=self._params.dead_zone,
+            confidence=min(abs(self._out), 1.0),
+        )

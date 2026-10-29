@@ -11,6 +11,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from inmotion.gestures.base import (
+    AnalogGesture,
     AnalogParams,
     Direction,
     EventKind,
@@ -456,6 +457,70 @@ def test_start_and_pulse_events_carry_confidence() -> None:
     assert start.confidence == pytest.approx(0.5)
     assert pulse is not None
     assert pulse.confidence == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# T7 — AnalogGesture
+# ---------------------------------------------------------------------------
+
+
+def test_analog_dead_zone_gain_and_none() -> None:
+    """CA5: |x| ≤ zona → 0; None → 0; fora da zona → gain·x."""
+    gesture = AnalogGesture("lean", AnalogParams(dead_zone=0.1, gain=2.0))
+
+    got = [(gesture.update(x, i * DT)) for i, x in enumerate([0.05, -0.1, 0.1, 0.3, -0.3, None])]
+
+    assert [e.kind for e in got] == [EventKind.VALUE] * 6
+    assert [e.value for e in got] == pytest.approx([0.0, 0.0, 0.0, 0.6, -0.6, 0.0])
+    assert [e.gesture for e in got] == ["lean"] * 6
+    assert got[3].t == pytest.approx(0.3)
+
+
+def test_analog_non_finite_input_is_zero() -> None:
+    gesture = AnalogGesture("lean", AnalogParams(dead_zone=0.0, gain=1.0))
+
+    assert gesture.update(float("nan"), 0.0).value == 0.0
+    assert gesture.update(float("inf"), 0.1).value == 0.0
+
+
+def test_analog_snapshot_and_reset() -> None:
+    gesture = AnalogGesture("lean", AnalogParams(dead_zone=0.1, gain=2.0))
+    idle = gesture.snapshot()
+    assert (idle.kind, idle.state, idle.last_value, idle.confidence) == (
+        GestureKind.ANALOG,
+        GestureState.IDLE,
+        None,
+        0.0,
+    )
+
+    gesture.update(0.3, 0.0)
+    snap = gesture.snapshot()
+    assert (snap.name, snap.state, snap.counter, snap.last_value) == (
+        "lean",
+        GestureState.ACTIVE,
+        0,
+        0.3,
+    )
+    assert (snap.theta_on, snap.theta_off) == (0.1, 0.1)
+    assert snap.confidence == pytest.approx(0.6)
+
+    gesture.reset()
+    assert gesture.snapshot() == idle
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    dead_zone=st.floats(min_value=0.0, max_value=1.0),
+    gain=st.floats(min_value=-3.0, max_value=3.0),
+    x=features,
+)
+def test_analog_output_zero_inside_dead_zone(dead_zone: float, gain: float, x: Feature) -> None:
+    out = AnalogGesture("a", AnalogParams(dead_zone=dead_zone, gain=gain)).update(x, 0.0).value
+    assert out is not None
+    if x is None or abs(x) <= dead_zone:
+        assert out == 0.0
+    else:
+        assert out == gain * x
 
 
 # ---------------------------------------------------------------------------
