@@ -14,9 +14,6 @@ requires-python = ">=3.10,<3.11"  # ver GUIA_CLAUDE §9: upgrade só via ADR
 target-version = "py310"
 line-length = 100
 src = [".", "tests"]
-# Protótipo legado: substituído pelo pacote inmotion/ (specs 002 e 008).
-# Fica fora do lint para não poluir o DoD; não editar, só remover.
-extend-exclude = ["main.py", "PoseModule.py", "actions/"]
 
 [tool.ruff.lint]
 select = [
