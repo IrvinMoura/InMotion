@@ -3,6 +3,8 @@
 Núcleo puro: o tempo entra como parâmetro e o input sai por um ``InputBackend``.
 """
 
+import atexit
+import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -10,6 +12,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from kinect.input.backend import MOUSE_BUTTONS, InputBackend, KeyName
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -107,7 +111,8 @@ class SafetyManager:
 
     @property
     def input(self) -> TrackedInput:
-        raise NotImplementedError
+        """O que os gestos usam para apertar e soltar."""
+        return self._tracked
 
     def on_frame(self, t: float, tracking_ok: bool) -> None:
         raise NotImplementedError
@@ -117,12 +122,26 @@ class SafetyManager:
 
     @contextmanager
     def guard(self) -> Iterator["SafetyManager"]:
-        raise NotImplementedError
-        yield self
+        """Solta todo o input em qualquer saída do bloco; exceções são propagadas.
+
+        Se ``release_all()`` falhar enquanto outra exceção já está em curso, a falha é
+        registrada no log e a exceção original segue (não é mascarada).
+        """
+        try:
+            yield self
+        except BaseException:
+            try:
+                self._tracked.release_all()
+            except Exception:
+                _log.exception("release_all() falhou durante o tratamento de outra exceção")
+            raise
+        else:
+            self._tracked.release_all()
 
 
 def register_atexit(
     manager: SafetyManager,
     register: Callable[[Callable[[], None]], object] | None = None,
 ) -> None:
-    raise NotImplementedError
+    """Registra ``release_all()`` para a saída do interpretador (padrão: ``atexit``)."""
+    (register or atexit.register)(manager.input.release_all)

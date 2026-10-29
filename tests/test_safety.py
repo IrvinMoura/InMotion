@@ -1,9 +1,17 @@
 """Spec 001 — SafetyManager: nenhum caminho deixa input pressionado."""
 
+from collections.abc import Callable
+
 import pytest
 
 from kinect.input.backend import MOUSE_BUTTONS, KeyName
-from kinect.safety import SafetyConfig, SafetyManager, SafetyState, TrackedInput
+from kinect.safety import (
+    SafetyConfig,
+    SafetyManager,
+    SafetyState,
+    TrackedInput,
+    register_atexit,
+)
 from tests.fakes import FakeInputBackend, SimulatedReleaseError
 
 
@@ -91,7 +99,6 @@ def test_press_ignored_when_disabled() -> None:
 # --- guard() (CA4, CA5) ------------------------------------------------------------
 
 
-@pending("T3")
 def test_guard_releases_on_exception_and_reraises() -> None:
     manager, fake = make_manager()
 
@@ -101,7 +108,6 @@ def test_guard_releases_on_exception_and_reraises() -> None:
     assert fake.pressed == set()
 
 
-@pending("T3")
 def test_guard_releases_on_keyboard_interrupt() -> None:
     manager, fake = make_manager()
 
@@ -111,7 +117,6 @@ def test_guard_releases_on_keyboard_interrupt() -> None:
     assert fake.pressed == set()
 
 
-@pending("T3")
 def test_guard_releases_on_failsafe_like_exception() -> None:
     manager, fake = make_manager()
 
@@ -121,12 +126,34 @@ def test_guard_releases_on_failsafe_like_exception() -> None:
     assert fake.pressed == set()
 
 
-@pending("T3")
 def test_guard_releases_on_normal_exit() -> None:
     manager, fake = make_manager()
 
     with manager.guard():
         manager.input.press("w")
+
+    assert fake.pressed == set()
+
+
+def test_guard_keeps_original_exception_if_release_fails() -> None:
+    fake = FakeInputBackend(fail_on_release={"mouse_middle"})
+    manager = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig())
+
+    with pytest.raises(BoomError):
+        press_then_raise(manager, "space", BoomError())
+
+    assert "space" not in fake.pressed
+
+
+def test_register_atexit_callback_releases_all() -> None:
+    manager, fake = make_manager()
+    callbacks: list[Callable[[], None]] = []
+
+    register_atexit(manager, register=callbacks.append)
+    manager.input.press("shift")
+    assert len(callbacks) == 1
+
+    callbacks[0]()
 
     assert fake.pressed == set()
 
