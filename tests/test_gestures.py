@@ -18,12 +18,11 @@ from inmotion.gestures.base import (
     GestureEvent,
     GestureKind,
     GestureParams,
+    GestureSnapshot,
     GestureState,
 )
 
 DT = 0.1  # intervalo entre frames dos testes determinísticos (s)
-
-xfail_t1 = pytest.mark.xfail(strict=True, raises=NotImplementedError)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -166,7 +165,6 @@ def test_trigger_pulses_respect_cooldown(values: list[float], steps: list[float]
     assert all(b - a >= t_cd for a, b in itertools.pairwise(pulses))
 
 
-@xfail_t1
 def test_reset_rearms_after_n_frames() -> None:
     """CA9/RF5b: ACTIVE + reset() → IDLE sem evento; pose mantida re-arma com START no N-ésimo."""
     n = 3
@@ -342,6 +340,122 @@ def test_hold_with_cooldown_delays_restart() -> None:
     event = gesture.update(0.0, 2.0)
     assert event is not None
     assert event.kind is EventKind.START
+
+
+# ---------------------------------------------------------------------------
+# T6 — reset, close e snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_reset_from_cooldown_and_arming_clears_everything_without_events() -> None:
+    params = GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=2, cooldown_s=10.0)
+    gesture = Gesture("g", GestureKind.HOLD, params)
+    feed(gesture, [0.0, 0.0, 1.0])  # START e END: em COOLDOWN
+    assert gesture.snapshot().state is GestureState.COOLDOWN
+    gesture.reset()
+    assert gesture.snapshot().state is GestureState.IDLE
+    assert gesture.snapshot().last_value is None
+
+    gesture.update(0.0, 5.0)  # ARMING
+    assert gesture.snapshot().state is GestureState.ARMING
+    gesture.reset()
+    snap = gesture.snapshot()
+    assert (snap.state, snap.counter, snap.confidence) == (GestureState.IDLE, 0, 0.0)
+    # o cooldown também foi zerado: ativa em 2 frames mesmo logo após o END
+    assert kinds(feed(gesture, [0.0, 0.0], t0=5.1)) == [None, EventKind.START]
+
+
+def test_close_ends_active_hold() -> None:
+    """RF5: close() emite END se o HOLD está ACTIVE; depois não há mais nada a soltar."""
+    gesture = Gesture(
+        "g", GestureKind.HOLD, GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=1)
+    )
+    feed(gesture, [0.0])
+
+    event = gesture.close(3.0)
+
+    assert event is not None
+    assert (event.gesture, event.kind, event.t) == ("g", EventKind.END, 3.0)
+    assert gesture.close(3.1) is None
+
+
+@pytest.mark.parametrize("prefix", [[], [0.0]])  # IDLE; ARMING (N = 2)
+def test_close_is_silent_when_not_active(prefix: list[float]) -> None:
+    gesture = Gesture(
+        "g", GestureKind.HOLD, GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=2)
+    )
+    feed(gesture, prefix)
+
+    assert gesture.close(1.0) is None
+
+
+@pytest.mark.parametrize(
+    ("direction", "theta_on", "theta_off", "values", "expected"),
+    [
+        (Direction.BELOW, 0.4, 0.6, [0.3, 0.0, 0.4, 0.5, 0.9], [0.5, 1.0, 0.0, 0.0, 0.0]),
+        (Direction.ABOVE, 0.6, 0.4, [0.7, 1.0, 0.6, 0.5, 0.1], [0.5, 1.0, 0.0, 0.0, 0.0]),
+    ],
+)
+def test_confidence_is_normalized_margin_on_active_side(
+    direction: Direction,
+    theta_on: float,
+    theta_off: float,
+    values: list[float],
+    expected: list[float],
+) -> None:
+    """Premissa 2: c = clip(|f − θ_on| / |θ_off − θ_on|, 0, 1) no lado ativo; 0 fora dele."""
+    params = GestureParams(theta_on=theta_on, theta_off=theta_off, direction=direction)
+    gesture = Gesture("g", GestureKind.HOLD, params)
+
+    got = []
+    for i, v in enumerate(values):
+        gesture.update(v, i * DT)
+        got.append(gesture.snapshot().confidence)
+
+    assert got == pytest.approx(expected)
+
+
+def test_snapshot_fields_and_confidence_range() -> None:
+    """CA8/RF6: o snapshot traz estado, c, último f, θ_on, θ_off e confiança em [0, 1]."""
+    params = GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=3)
+    gesture = Gesture("punch", GestureKind.HOLD, params)
+    gesture.update(0.2, 0.0)
+
+    snap = gesture.snapshot()
+
+    assert snap == GestureSnapshot(
+        name="punch",
+        kind=GestureKind.HOLD,
+        state=GestureState.ARMING,
+        counter=1,
+        last_value=0.2,
+        theta_on=0.4,
+        theta_off=0.6,
+        confidence=snap.confidence,
+    )
+    assert snap.confidence == pytest.approx(1.0)
+
+
+@settings(max_examples=200, deadline=None)
+@given(params=gesture_params(), values=st.lists(features, max_size=60))
+def test_confidence_always_within_unit_interval(
+    params: GestureParams, values: list[Feature]
+) -> None:
+    gesture = Gesture("g", GestureKind.HOLD, params)
+    for i, v in enumerate(values):
+        gesture.update(v, i * DT)
+        assert 0.0 <= gesture.snapshot().confidence <= 1.0
+
+
+def test_start_and_pulse_events_carry_confidence() -> None:
+    params = GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=1)
+    start = Gesture("h", GestureKind.HOLD, params).update(0.3, 0.0)
+    pulse = Gesture("p", GestureKind.TRIGGER, params).update(0.0, 0.0)
+
+    assert start is not None
+    assert start.confidence == pytest.approx(0.5)
+    assert pulse is not None
+    assert pulse.confidence == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------

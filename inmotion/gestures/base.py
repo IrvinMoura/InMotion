@@ -173,7 +173,7 @@ class Gesture:
         self._state = GestureState.ACTIVE
         # TRIGGER: um único PULSE; o período refratário é ACTIVE → COOLDOWN → IDLE (E4).
         kind = EventKind.START if self._kind is GestureKind.HOLD else EventKind.PULSE
-        return GestureEvent(self._name, kind, t)
+        return GestureEvent(self._name, kind, t, confidence=self._confidence())
 
     def _deactivate(self, t: float) -> GestureEvent | None:
         self._state = GestureState.COOLDOWN
@@ -183,8 +183,25 @@ class Gesture:
             return GestureEvent(self._name, EventKind.END, t)
         return None
 
+    def _confidence(self) -> float:
+        """Confiança c = clip(|f − θ_on| / |θ_off − θ_on|, 0, 1) no lado ativo; 0 fora dele."""
+        if self._last is None:
+            return 0.0
+        margin = self._on - self._sign * self._last  # > 0 só no lado ativo (f < θ_on)
+        if margin <= 0.0:
+            return 0.0
+        return min(margin / (self._off - self._on), 1.0)
+
     def reset(self) -> None:
-        raise NotImplementedError
+        """RF5b: volta a IDLE com c = 0, SEM emitir evento.
+
+        Usado quando o SafetyManager já soltou tudo (PAUSED/LOST): uma pose mantida
+        re-arma e emite START de novo após N frames. Zera também o cooldown.
+        """
+        self._state = GestureState.IDLE
+        self._count = 0
+        self._t_end = 0.0
+        self._last = None
 
     def close(self, t: float) -> GestureEvent | None:
         """RF5: encerra o HOLD ativo com END, para nunca sobrar input pressionado."""
@@ -202,7 +219,7 @@ class Gesture:
             last_value=self._last,
             theta_on=self._params.theta_on,
             theta_off=self._params.theta_off,
-            confidence=0.0,  # provisório: premissa 2 na T6
+            confidence=self._confidence(),
         )
 
 
