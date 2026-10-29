@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from kinect.input.backend import KeyName
+from inmotion.input.backend import KeyName
 
 _MOUSE_BUTTONS = {"mouse_left": "left", "mouse_right": "right", "mouse_middle": "middle"}
 

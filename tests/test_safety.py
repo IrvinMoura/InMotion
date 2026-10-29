@@ -7,8 +7,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from kinect.input.backend import MOUSE_BUTTONS, KeyName
-from kinect.safety import (
+from inmotion.input.backend import MOUSE_BUTTONS, KeyName
+from inmotion.safety import (
     SafetyAction,
     SafetyConfig,
     SafetyManager,

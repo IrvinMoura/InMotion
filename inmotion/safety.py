@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from kinect.input.backend import MOUSE_BUTTONS, InputBackend, KeyName
+from inmotion.input.backend import MOUSE_BUTTONS, InputBackend, KeyName
 
 _log = logging.getLogger(__name__)
 

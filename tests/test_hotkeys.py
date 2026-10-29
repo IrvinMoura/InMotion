@@ -2,7 +2,7 @@
 
 import pytest
 
-from kinect.input.hotkeys import WindowsHotkeys
+from inmotion.input.hotkeys import WindowsHotkeys
 from tests.fakes import FakeUser32
 
 VK_F8, VK_F9 = 0x77, 0x78

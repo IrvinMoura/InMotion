@@ -1,7 +1,7 @@
-import kinect
-import kinect.input
+import inmotion
+import inmotion.input
 
 
 def test_package_imports() -> None:
-    assert kinect.__doc__
-    assert kinect.input.__doc__
+    assert inmotion.__doc__
+    assert inmotion.input.__doc__

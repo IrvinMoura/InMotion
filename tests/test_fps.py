@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from kinect.fps import FpsMeter
+from inmotion.fps import FpsMeter
 
 
 def test_first_frame_returns_none() -> None:

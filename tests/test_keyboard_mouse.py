@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from kinect.input.hotkeys import WindowsHotkeys
-from kinect.input.keyboard_mouse import KeyboardMouseBackend
+from inmotion.input.hotkeys import WindowsHotkeys
+from inmotion.input.keyboard_mouse import KeyboardMouseBackend
 from tests.fakes import FakeDirectInput
 
 

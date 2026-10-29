@@ -1,8 +1,8 @@
-# Configuração das ferramentas do KinectProject.
+# Configuração das ferramentas do Projeto InMotion.
 # Dependências ficam em requirements.txt / requirements-dev.txt (versões fixas).
 
 [project]
-name = "kinect"
+name = "inmotion"
 version = "0.0.0"
 description = "Controle de jogos por visão computacional com uma webcam (Projeto A3)."
 requires-python = ">=3.10,<3.11"  # ver GUIA_CLAUDE §9: upgrade só via ADR
@@ -14,7 +14,7 @@ requires-python = ">=3.10,<3.11"  # ver GUIA_CLAUDE §9: upgrade só via ADR
 target-version = "py310"
 line-length = 100
 src = [".", "tests"]
-# Protótipo legado: substituído pelo pacote kinect/ (specs 002 e 008).
+# Protótipo legado: substituído pelo pacote inmotion/ (specs 002 e 008).
 # Fica fora do lint para não poluir o DoD; não editar, só remover.
 extend-exclude = ["main.py", "PoseModule.py", "actions/"]
 
@@ -49,15 +49,15 @@ allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "�
 
 [tool.ruff.lint.per-file-ignores]
 # Adaptadores e composição: podem usar I/O e bibliotecas externas.
-"kinect/__main__.py" = ["TID251"]
-"kinect/app.py" = ["TID251"]
-"kinect/capture/**" = ["TID251"]
-"kinect/vision/pose.py" = ["TID251"]
-"kinect/vision/preprocess.py" = ["TID251"]
-"kinect/input/keyboard_mouse.py" = ["TID251"]
-"kinect/input/gamepad.py" = ["TID251"]
-"kinect/overlay.py" = ["TID251"]
-"kinect/recorder.py" = ["TID251"]
+"inmotion/__main__.py" = ["TID251"]
+"inmotion/app.py" = ["TID251"]
+"inmotion/capture/**" = ["TID251"]
+"inmotion/vision/pose.py" = ["TID251"]
+"inmotion/vision/preprocess.py" = ["TID251"]
+"inmotion/input/keyboard_mouse.py" = ["TID251"]
+"inmotion/input/gamepad.py" = ["TID251"]
+"inmotion/overlay.py" = ["TID251"]
+"inmotion/recorder.py" = ["TID251"]
 "tools/**" = ["TID251"]
 "tests/**" = ["TID251"]
 
@@ -85,7 +85,7 @@ xfail_strict = true
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.10"
-files = ["kinect"]
+files = ["inmotion"]
 warn_unused_configs = true
 warn_redundant_casts = true
 show_error_codes = true
@@ -95,13 +95,13 @@ pretty = true
 # as flags estão explícitas). Todo módulo puro novo entra nesta lista.
 [[tool.mypy.overrides]]
 module = [
-    "kinect.vision.geometry",
-    "kinect.fps",
-    "kinect.filters.*",
-    "kinect.gestures.*",
-    "kinect.safety",
-    "kinect.calibration",
-    "kinect.input.backend",
+    "inmotion.vision.geometry",
+    "inmotion.fps",
+    "inmotion.filters.*",
+    "inmotion.gestures.*",
+    "inmotion.safety",
+    "inmotion.calibration",
+    "inmotion.input.backend",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

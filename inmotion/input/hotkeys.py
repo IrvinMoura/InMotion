@@ -3,7 +3,7 @@
 import ctypes
 from typing import Any
 
-from kinect.input.backend import KeyName
+from inmotion.input.backend import KeyName
 
 # Códigos de tecla virtual do Windows (winuser.h).
 _VK_CODES: dict[KeyName, int] = {
