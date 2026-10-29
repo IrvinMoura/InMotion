@@ -79,7 +79,6 @@ def gesture_params(
 # ---------------------------------------------------------------------------
 
 
-@xfail_t1
 @settings(max_examples=200, deadline=None)
 @given(
     params=gesture_params(debounce=1, cooldown=0.0),
@@ -102,7 +101,6 @@ def test_bounded_noise_at_most_one_transition(
     assert changes <= 1
 
 
-@xfail_t1
 @pytest.mark.parametrize("n", [1, 2, 3, 5])
 def test_activation_needs_n_consecutive_frames(n: int) -> None:
     """E2/CA2: N−1 frames ativos e depois inativo não dão START; N frames dão, no N-ésimo."""
@@ -117,7 +115,6 @@ def test_activation_needs_n_consecutive_frames(n: int) -> None:
     assert kinds(out) == [None] * (n - 1) + [EventKind.START, None]
 
 
-@xfail_t1
 @settings(max_examples=200, deadline=None)
 @given(
     params=gesture_params(),
@@ -185,6 +182,58 @@ def test_reset_rearms_after_n_frames() -> None:
     assert gesture.snapshot().counter == 0
     out = feed(gesture, [0.0] * n, t0=10.0)
     assert kinds(out) == [None] * (n - 1) + [EventKind.START]
+
+
+# ---------------------------------------------------------------------------
+# T3 — máquina de estados HOLD
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("missing", [None, float("nan"), float("inf")])
+def test_none_while_active_ends_hold(missing: float | None) -> None:
+    """RF4: feature inválida (None; também NaN/inf) em ACTIVE encerra o hold na hora."""
+    gesture = Gesture(
+        "g", GestureKind.HOLD, GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=2)
+    )
+    feed(gesture, [0.0, 0.0])
+    assert is_active(gesture)
+
+    event = gesture.update(missing, 1.0)
+
+    assert event is not None
+    assert (event.gesture, event.kind, event.t) == ("g", EventKind.END, 1.0)
+    assert not is_active(gesture)
+
+
+def test_none_while_arming_returns_to_idle() -> None:
+    """RF2/R5: None em ARMING zera o contador; é preciso N frames seguidos de novo."""
+    gesture = Gesture(
+        "g", GestureKind.HOLD, GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=3)
+    )
+
+    out = feed(gesture, [0.0, 0.0, None, 0.0, 0.0, 0.0])
+
+    assert kinds(out) == [None] * 5 + [EventKind.START]
+
+
+def test_hysteresis_band_keeps_hold_active() -> None:
+    """R6: dentro de [θ_on, θ_off] o estado se mantém; só f > θ_off encerra."""
+    gesture = Gesture(
+        "g", GestureKind.HOLD, GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=1)
+    )
+
+    out = feed(gesture, [0.0, 0.5, 0.4, 0.6, 0.61])
+
+    assert kinds(out) == [EventKind.START, None, None, None, EventKind.END]
+
+
+def test_band_does_not_activate_from_idle() -> None:
+    """R6: um f na banda (θ_on ≤ f ≤ θ_off) não ativa quem estava inativo."""
+    gesture = Gesture(
+        "g", GestureKind.HOLD, GestureParams(theta_on=0.4, theta_off=0.6, debounce_frames=1)
+    )
+
+    assert kinds(feed(gesture, [0.5, 0.4, 0.6])) == [None, None, None]
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 """Base dos gestos: máquina de estados com debounce (R5) e histerese (R6).
 
-STUB da spec 007 T1: a implementação vem nas tarefas seguintes.
+Núcleo puro: o tempo entra sempre como parâmetro `t`.
 """
 
 from __future__ import annotations
@@ -100,7 +100,21 @@ class GestureSnapshot:
 
 
 class Gesture:
-    """Máquina de estados com R5 (debounce) e R6 (histerese)."""
+    """Máquina de estados IDLE → ARMING → ACTIVE → COOLDOWN com R5 (debounce) e R6 (histerese).
+
+    Modelo (sentido `BELOW`; o `ABOVE` usa f' = −f e θ' = −θ, uma única implementação):
+
+    - (R6) a condição de ativação vale com f < θ_on; o gesto só sai de ACTIVE com f > θ_off;
+      entre os dois limiares o estado anterior é mantido (histerese).
+    - (R5) c_n = c_{n−1} + 1 se a condição vale; senão c_n = 0. Ativa quando c_n ≥ N.
+    - Tipos: HOLD emite START ao entrar em ACTIVE e END ao sair (f > θ_off, f inválido ou
+      `close()`); TRIGGER emite um PULSE ao entrar em ACTIVE e nunca END.
+    - Ao sair de ACTIVE entra em COOLDOWN (t_end = t) e só volta a IDLE quando
+      t − t_end ≥ T_cd, reavaliando f no mesmo frame.
+
+    Propriedades: E1 (anti-flicker), E2 (START só após N frames), E3 (START/END alternados
+    e balanceados após `close()`), E4 (pulsos distam ≥ T_cd). O tempo `t` é sempre parâmetro.
+    """
 
     def __init__(
         self,
@@ -108,19 +122,88 @@ class Gesture:
         kind: Literal[GestureKind.HOLD, GestureKind.TRIGGER],
         params: GestureParams,
     ) -> None:
-        raise NotImplementedError
+        if kind not in (GestureKind.HOLD, GestureKind.TRIGGER):
+            raise ValueError("Gesture só aceita HOLD ou TRIGGER (use AnalogGesture)")
+        self._name = name
+        self._kind = kind
+        self._params = params
+        # Espelho de sinal: no ABOVE, f' = −f e θ' = −θ; assim `BELOW` vale para os dois.
+        self._sign = 1.0 if params.direction is Direction.BELOW else -1.0
+        self._on = self._sign * params.theta_on
+        self._off = self._sign * params.theta_off
+        self._state = GestureState.IDLE
+        self._count = 0
+        self._t_end = 0.0
+        self._last: float | None = None
 
     def update(self, f: float | None, t: float) -> GestureEvent | None:
-        raise NotImplementedError
+        """Avança a máquina com a feature `f` (ou None) no instante `t`.
+
+        Um f não finito (NaN/inf) conta como None: feature inválida (RF4).
+        """
+        if f is not None and not math.isfinite(f):
+            f = None
+        self._last = f
+        s = None if f is None else self._sign * f
+
+        if self._state is GestureState.COOLDOWN:
+            if t - self._t_end < self._params.cooldown_s:
+                return None
+            self._state = GestureState.IDLE  # reavalia f neste mesmo frame
+            self._count = 0
+
+        if self._state is GestureState.ACTIVE:
+            # R6: só sai além de θ_off (ou com feature inválida); na banda, mantém.
+            if s is None or s > self._off:
+                return self._deactivate(t)
+            return None
+
+        # IDLE ou ARMING (R5): conta frames seguidos com f < θ_on.
+        if s is None or not s < self._on:
+            self._state = GestureState.IDLE
+            self._count = 0
+            return None
+        self._count += 1
+        self._state = GestureState.ARMING
+        if self._count >= self._params.debounce_frames:
+            return self._activate(t)
+        return None
+
+    def _activate(self, t: float) -> GestureEvent:
+        self._state = GestureState.ACTIVE
+        if self._kind is GestureKind.HOLD:
+            return GestureEvent(self._name, EventKind.START, t)
+        raise NotImplementedError("TRIGGER: spec 007 T5")
+
+    def _deactivate(self, t: float) -> GestureEvent | None:
+        self._state = GestureState.COOLDOWN
+        self._t_end = t
+        self._count = 0
+        if self._kind is GestureKind.HOLD:
+            return GestureEvent(self._name, EventKind.END, t)
+        return None
 
     def reset(self) -> None:
         raise NotImplementedError
 
     def close(self, t: float) -> GestureEvent | None:
-        raise NotImplementedError
+        """RF5: encerra o HOLD ativo com END, para nunca sobrar input pressionado."""
+        if self._kind is GestureKind.HOLD and self._state is GestureState.ACTIVE:
+            return self._deactivate(t)
+        return None
 
     def snapshot(self) -> GestureSnapshot:
-        raise NotImplementedError
+        """Estado inspecionável para o overlay (RF6)."""
+        return GestureSnapshot(
+            name=self._name,
+            kind=self._kind,
+            state=self._state,
+            counter=self._count,
+            last_value=self._last,
+            theta_on=self._params.theta_on,
+            theta_off=self._params.theta_off,
+            confidence=0.0,  # provisório: premissa 2 na T6
+        )
 
 
 class AnalogGesture:
