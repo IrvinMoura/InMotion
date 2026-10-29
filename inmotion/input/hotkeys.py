@@ -9,6 +9,7 @@ from inmotion.input.backend import KeyName
 _VK_CODES: dict[KeyName, int] = {
     **{f"f{n}": 0x70 + n - 1 for n in range(1, 25)},  # VK_F1 = 0x70 … VK_F24 = 0x87
     "scrolllock": 0x91,
+    **{str(n): 0x30 + n for n in range(10)},  # dígitos 0 a 9 da linha superior: 0x30 … 0x39
 }
 _PRESSED_NOW = 0x8000
 

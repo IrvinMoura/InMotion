@@ -30,3 +30,11 @@ def test_poll_ignores_low_bit() -> None:
 def test_unknown_key_name_raises() -> None:
     with pytest.raises(ValueError, match="tecla_inexistente"):
         WindowsHotkeys(frozenset({"f8", "tecla_inexistente"}), user32=FakeUser32())
+
+
+def test_digit_keys_supported() -> None:
+    """Spec 011 T4: dígitos 0 a 9 mapeiam para VK 0x30 a 0x39."""
+    user32 = FakeUser32({0x31: PRESSED, 0x35: PRESSED, 0x30: 0, 0x39: PRESSED_SINCE_LAST_CALL})
+    hotkeys = WindowsHotkeys(frozenset(str(n) for n in range(10)), user32=user32)
+
+    assert hotkeys.poll() == frozenset({"1", "5"})
