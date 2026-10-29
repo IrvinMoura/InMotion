@@ -1,5 +1,10 @@
 """Spec 002 T5 — Pipeline.step: segurança -> gestos (só em ACTIVE) -> FPS."""
 
+import numpy as np
+import pytest
+
+from inmotion.filters import FloatArray
+from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
 from inmotion.input.backend import MOUSE_BUTTONS
 from inmotion.pipeline import Pipeline
@@ -106,3 +111,73 @@ def test_step_result_carries_t_pose_and_fps() -> None:
     assert r1.fps is not None
     assert abs(r1.fps - 20.0) < 1e-9
     assert r1.pose is p1
+
+
+# ---------------------------------------------------------------------------
+# Spec 006 T6 — pose_filter opcional, aplicado antes dos gestos.
+# ---------------------------------------------------------------------------
+
+FILTERED_X = 0.25
+
+
+class ConstantTemporalFilter:
+    """TemporalFilter de teste: troca toda amostra por ``FILTERED_X`` e conta os resets."""
+
+    def __init__(self) -> None:
+        self.resets = 0
+
+    def update(self, x: FloatArray | float, t: float) -> FloatArray:
+        return np.full_like(np.asarray(x, dtype=np.float64), FILTERED_X)
+
+    def reset(self) -> None:
+        self.resets += 1
+
+
+class PoseRecordingGesture:
+    """Gesto de teste: guarda o x do landmark 0 que recebeu."""
+
+    def __init__(self) -> None:
+        self.seen_x: list[float] = []
+
+    def update(self, pose: PoseFrame, out: TrackedInput) -> None:
+        self.seen_x.append(float(pose.landmarks[0, 0]))
+
+    def reset(self) -> None:
+        pass
+
+
+def make_filtered_pipeline() -> tuple[Pipeline, PoseRecordingGesture, list[ConstantTemporalFilter]]:
+    inner: list[ConstantTemporalFilter] = []
+
+    def factory() -> ConstantTemporalFilter:
+        inner.append(ConstantTemporalFilter())
+        return inner[-1]
+
+    safety = SafetyManager(
+        TrackedInput(FakeInputBackend(), MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2)
+    )
+    gesture = PoseRecordingGesture()
+    pipeline = Pipeline(safety, [gesture], FpsMeter(window=30), PoseFilter(factory))
+    return pipeline, gesture, inner
+
+
+def test_pose_filter_applied_before_gestures() -> None:
+    pipeline, gesture, _ = make_filtered_pipeline()
+    raw = make_pose({0: (64.0, 48.0)}, t=0.0)  # x normalizado = 0,1
+
+    result = pipeline.step(raw, 0.0)
+
+    assert gesture.seen_x == [FILTERED_X]  # o gesto recebeu a pose filtrada
+    assert result.pose is not None
+    assert float(result.pose.landmarks[0, 0]) == FILTERED_X  # e o resultado também
+    assert float(raw.landmarks[0, 0]) == pytest.approx(0.1)  # a original não muda
+
+
+def test_pose_filter_reset_on_lost() -> None:
+    pipeline, _, inner = make_filtered_pipeline()
+    pipeline.step(make_pose({}, t=0.0), 0.0)
+    image_filter = inner[0]  # (o de world é resetado pelo PoseFilter quando a pose não tem world)
+    assert image_filter.resets == 0
+
+    pipeline.step(None, 0.1)  # perdeu a pose
+    assert image_filter.resets == 1

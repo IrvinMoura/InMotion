@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from inmotion.app import AppDeps, run
+from inmotion.filters.pose_filter import PoseFilter
 from inmotion.safety import SafetyConfig
 from inmotion.types import FramePacket, PoseFrame
 from inmotion.vision.landmarks import PoseLandmark
@@ -66,6 +67,7 @@ def make_deps(
         hotkeys=hotkeys or FakeHotkeys([]),
         clock=clock,
         display=None,
+        pose_filter=None,  # o One Euro atrasaria o pulo sintético; ele é testado à parte
     )
 
 
@@ -153,3 +155,16 @@ def test_watchdog_releases_keys_while_loop_is_stalled() -> None:
     assert ("press", "space") in backend.events
     assert source.released_during_stall is True  # soltou enquanto o read ainda estava preso
     assert backend.pressed == set()
+
+
+def test_default_deps_use_one_euro_filter() -> None:
+    clock = FakeClock()
+    deps = AppDeps(
+        source=FakeFrameSource([]),
+        estimator=FakePoseEstimator([]),
+        backend=FakeInputBackend(),
+        hotkeys=FakeHotkeys([]),
+        clock=clock,
+        display=None,
+    )
+    assert isinstance(deps.pose_filter, PoseFilter)

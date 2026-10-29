@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
 from inmotion.gestures.legacy import LegacyGesture
 from inmotion.safety import SafetyManager, SafetyState
@@ -22,14 +23,23 @@ class StepResult:
 
 
 class Pipeline:
-    """Um passo por frame: ``on_frame`` → gestos (só em ACTIVE) → FPS."""
+    """Um passo por frame: ``on_frame`` → filtro → gestos (só em ACTIVE) → FPS.
+
+    O ``pose_filter`` opcional (spec 006) suaviza a pose antes dos gestos; o ``StepResult``
+    carrega a pose filtrada.
+    """
 
     def __init__(
-        self, safety: SafetyManager, gestures: Sequence[LegacyGesture], fps: FpsMeter
+        self,
+        safety: SafetyManager,
+        gestures: Sequence[LegacyGesture],
+        fps: FpsMeter,
+        pose_filter: PoseFilter | None = None,
     ) -> None:
         self._safety = safety
         self._gestures = tuple(gestures)
         self._fps = fps
+        self._pose_filter = pose_filter
         self._was_active = True  # gestos nascem zerados
 
     def step(self, pose: PoseFrame | None, t: float) -> StepResult:
@@ -46,6 +56,11 @@ class Pipeline:
             for gesture in self._gestures:
                 gesture.reset()
         self._was_active = active
+        if self._pose_filter is not None:
+            if pose is not None and active:
+                pose = self._pose_filter(pose)
+            else:
+                self._pose_filter.reset()  # sem pose ou fora de ACTIVE: recomeça limpo
         if active and pose is not None:
             for gesture in self._gestures:
                 gesture.update(pose, self._safety.input)

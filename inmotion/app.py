@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from inmotion.filters.one_euro import OneEuro, OneEuroParams
+from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
 from inmotion.gestures.legacy import LegacyGesture, LegacyJump, LegacyPunch
 from inmotion.input.backend import HotkeySource, InputBackend
@@ -45,6 +47,11 @@ _ATTACK_KEY = "mouse_left"
 _USE_ITEM_KEY = "mouse_right"
 
 
+def default_pose_filter() -> PoseFilter:
+    """One Euro (R4) com os parâmetros padrão: um filtro para image e outro para world."""
+    return PoseFilter(lambda: OneEuro(OneEuroParams()))
+
+
 @dataclass
 class AppDeps:
     """Dependências injetadas em ``run`` (adaptadores reais ou fakes)."""
@@ -55,6 +62,7 @@ class AppDeps:
     hotkeys: HotkeySource
     clock: Clock
     display: Display | None
+    pose_filter: PoseFilter | None = field(default_factory=default_pose_filter)
 
 
 class OpenCvDisplay:
@@ -106,7 +114,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
         LegacyPunch(Side.RIGHT, _ATTACK_KEY),
         LegacyPunch(Side.LEFT, _USE_ITEM_KEY),
     ]
-    pipeline = Pipeline(safety, gestures, FpsMeter(window=FPS_WINDOW))
+    pipeline = Pipeline(safety, gestures, FpsMeter(window=FPS_WINDOW), deps.pose_filter)
     watchdog = Watchdog(WATCHDOG_TIMEOUT_S)
     register_atexit(safety)
 
