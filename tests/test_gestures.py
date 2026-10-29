@@ -10,6 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from inmotion.gestures.base import (
+    AnalogParams,
     Direction,
     EventKind,
     Gesture,
@@ -184,3 +185,63 @@ def test_reset_rearms_after_n_frames() -> None:
     assert gesture.snapshot().counter == 0
     out = feed(gesture, [0.0] * n, t0=10.0)
     assert kinds(out) == [None] * (n - 1) + [EventKind.START]
+
+
+# ---------------------------------------------------------------------------
+# T2 — parâmetros validados
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("direction", "theta_on", "theta_off"),
+    [
+        (Direction.BELOW, 0.5, 0.5),  # iguais
+        (Direction.BELOW, 0.6, 0.4),  # invertidos
+        (Direction.ABOVE, 0.5, 0.5),
+        (Direction.ABOVE, 0.4, 0.6),
+        (Direction.BELOW, float("nan"), 0.6),
+        (Direction.BELOW, 0.4, float("inf")),
+        (Direction.ABOVE, float("-inf"), -1.0),
+    ],
+)
+def test_params_reject_wrong_threshold_order(
+    direction: Direction, theta_on: float, theta_off: float
+) -> None:
+    """CA7/RF8: BELOW exige θ_on < θ_off; ABOVE exige θ_on > θ_off; θ finitos."""
+    with pytest.raises(ValueError, match="theta"):
+        GestureParams(theta_on=theta_on, theta_off=theta_off, direction=direction)
+
+
+def test_params_accept_valid_order_in_both_directions() -> None:
+    assert GestureParams(theta_on=0.4, theta_off=0.6).direction is Direction.BELOW
+    above = GestureParams(theta_on=0.6, theta_off=0.4, direction=Direction.ABOVE)
+    assert above.theta_on > above.theta_off
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"debounce_frames": 0}, "debounce_frames"),
+        ({"debounce_frames": -2}, "debounce_frames"),
+        ({"cooldown_s": -0.1}, "cooldown_s"),
+        ({"cooldown_s": float("nan")}, "cooldown_s"),
+        ({"cooldown_s": float("inf")}, "cooldown_s"),
+    ],
+)
+def test_params_reject_invalid_debounce_and_cooldown(kwargs: dict[str, float], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        GestureParams(theta_on=0.4, theta_off=0.6, **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"dead_zone": -0.01}, "dead_zone"),
+        ({"dead_zone": float("nan")}, "dead_zone"),
+        ({"gain": float("inf")}, "gain"),
+        ({"gain": float("nan")}, "gain"),
+    ],
+)
+def test_analog_params_reject_invalid_values(kwargs: dict[str, float], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        AnalogParams(**kwargs)
