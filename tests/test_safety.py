@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 
 from kinect.input.backend import MOUSE_BUTTONS, KeyName
 from kinect.safety import (
+    SafetyAction,
     SafetyConfig,
     SafetyManager,
     SafetyState,
@@ -15,11 +16,6 @@ from kinect.safety import (
     register_atexit,
 )
 from tests.fakes import FakeInputBackend, SimulatedReleaseError
-
-
-def pending(task: str) -> pytest.MarkDecorator:
-    """Teste escrito antes da implementação (TDD); a tarefa indicada remove a marca."""
-    return pytest.mark.xfail(raises=NotImplementedError, strict=True, reason=f"spec 001 {task}")
 
 
 # Exceções próprias: NotImplementedError herda de RuntimeError, então usar RuntimeError
@@ -285,10 +281,9 @@ def test_release_count_matches_long_loss_runs(sequence: list[tuple[float, bool]]
     assert tracked.release_all_calls == long_loss_runs(times, oks, config.lost_timeout_s)
 
 
-# --- Pausa F8 (CA6) ------------------------------------------------------------------
+# --- Pausa F8 e saída F9 (CA6, CA6b) --------------------------------------------
 
 
-@pending("T6")
 def test_f8_edge_toggles_pause_once() -> None:
     manager, fake = make_manager()
     manager.input.press("mouse_left")
@@ -298,3 +293,72 @@ def test_f8_edge_toggles_pause_once() -> None:
 
     assert manager.state is SafetyState.PAUSED
     assert fake.pressed == set()
+
+
+F8 = frozenset({"f8"})
+F9 = frozenset({"f9"})
+NONE: frozenset[str] = frozenset()
+
+
+def test_press_ignored_while_paused() -> None:
+    manager, fake = make_manager()
+    manager.on_hotkeys(F8)
+
+    manager.input.press("w")
+    assert fake.pressed == set()
+
+    manager.on_hotkeys(NONE)
+    manager.on_hotkeys(F8)  # nova borda: retoma
+    manager.input.press("w")
+
+    assert manager.state is SafetyState.ACTIVE
+    assert fake.pressed == {"w"}
+
+
+def test_f9_edge_returns_exit_once() -> None:
+    manager, _ = make_manager()
+
+    actions = [manager.on_hotkeys(keys) for keys in (F9, F9, F9, NONE, F9)]
+
+    assert actions == [
+        SafetyAction.EXIT,
+        SafetyAction.NONE,
+        SafetyAction.NONE,
+        SafetyAction.NONE,
+        SafetyAction.EXIT,
+    ]
+
+
+def test_pause_has_priority_over_lost() -> None:
+    manager, fake = make_manager()
+    manager.on_frame(0.0, tracking_ok=True)
+    manager.on_hotkeys(F8)
+    manager.on_frame(0.5, tracking_ok=False)
+    assert manager.state is SafetyState.PAUSED
+
+    manager.on_hotkeys(NONE)
+    manager.on_hotkeys(F8)  # retoma, mas continua sem pose
+    assert manager.state is SafetyState.LOST
+    manager.input.press("w")
+    assert fake.pressed == set()
+
+    manager.on_frame(0.6, tracking_ok=True)
+    assert manager.state is SafetyState.ACTIVE
+
+
+@given(st.lists(st.booleans(), max_size=60))
+def test_toggle_count_equals_rising_edges(f8_held: list[bool]) -> None:
+    """S3: alternâncias da pausa = bordas de subida de F8 (não frames pressionados)."""
+    manager, _ = make_manager()
+    toggles = 0
+    previous_state = manager.state
+    for held in f8_held:
+        manager.on_hotkeys(F8 if held else NONE)
+        if manager.state is not previous_state:
+            toggles += 1
+        previous_state = manager.state
+
+    # [False, *f8_held] tem um elemento a mais de propósito: o estado antes do 1º frame.
+    pairs = zip([False, *f8_held], f8_held, strict=False)
+    rising_edges = sum(1 for prev, cur in pairs if cur and not prev)
+    assert toggles == rising_edges

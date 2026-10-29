@@ -107,9 +107,14 @@ class SafetyManager:
         self._last_t: float | None = None
         self._last_ok_t: float | None = None
         self._lost = False
+        self._paused = False
+        self._previous_keys: frozenset[KeyName] = frozenset()
 
     @property
     def state(self) -> SafetyState:
+        """PAUSED tem prioridade sobre LOST."""
+        if self._paused:
+            return SafetyState.PAUSED
         return SafetyState.LOST if self._lost else SafetyState.ACTIVE
 
     @property
@@ -136,18 +141,36 @@ class SafetyManager:
             self._last_ok_t = t
             if self._lost:
                 self._lost = False
-                self._tracked.set_enabled(True)
+                self._sync_enabled()
             return
 
         if self._last_ok_t is None:
             self._last_ok_t = t
         if not self._lost and t - self._last_ok_t >= self._config.lost_timeout_s:
             self._lost = True
-            self._tracked.set_enabled(False)  # antes de soltar: nenhum press entra no meio
+            self._sync_enabled()  # antes de soltar: nenhum press entra no meio
             self._tracked.release_all()
 
     def on_hotkeys(self, keys: frozenset[KeyName]) -> SafetyAction:
-        raise NotImplementedError
+        """Reage às bordas de subida das teclas globais (pressionar, não segurar).
+
+        Borda de ``pause_key``: alterna a pausa (S3: nº de alternâncias = nº de bordas);
+        ao pausar, solta tudo. Borda de ``exit_key``: devolve ``SafetyAction.EXIT``.
+        """
+        rising = keys - self._previous_keys
+        self._previous_keys = keys
+
+        if self._config.pause_key in rising:
+            self._paused = not self._paused
+            self._sync_enabled()
+            if self._paused:
+                self._tracked.release_all()
+
+        return SafetyAction.EXIT if self._config.exit_key in rising else SafetyAction.NONE
+
+    def _sync_enabled(self) -> None:
+        """Input só é aceito em ACTIVE: nem pausado (S5), nem sem pose."""
+        self._tracked.set_enabled(not (self._paused or self._lost))
 
     @contextmanager
     def guard(self) -> Iterator["SafetyManager"]:
