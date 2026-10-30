@@ -110,6 +110,7 @@ module = [
     "inmotion.filters.*",
     "inmotion.gestures.*",
     "inmotion.safety",
+    "inmotion.mapping",
     "inmotion.calibration",
     "inmotion.input.backend",
     "inmotion.config.schema",
