@@ -302,3 +302,56 @@ def test_gesture_params_come_from_config() -> None:
     run(deps, NO_PERSISTENCE, max_frames=6)
 
     assert ("press", "mouse_left") not in backend.events
+
+
+# --- Spec 005 T7b: o app aplica o pré-processamento (blur A2) antes da pose ---
+
+
+class ImageSpyEstimator(FakePoseEstimator):
+    """Guarda a imagem que chegou ao estimador."""
+
+    def __init__(self) -> None:
+        super().__init__([])
+        self.images: list[np.ndarray] = []
+
+    def estimate(self, image_bgr: np.ndarray, t: float) -> PoseFrame | None:
+        self.images.append(image_bgr)
+        return super().estimate(image_bgr, t)
+
+
+class SpyDisplay:
+    def __init__(self) -> None:
+        self.images: list[np.ndarray] = []
+
+    def show(self, image: np.ndarray, result: object) -> bool:
+        self.images.append(image)
+        return True
+
+    def close(self) -> None:
+        pass
+
+
+def test_preprocess_runs_before_pose_and_display_shows_raw_frame() -> None:
+    clock = FakeClock()
+    estimator = ImageSpyEstimator()
+    display = SpyDisplay()
+    deps = make_deps(clock, ClockedSource(clock, 3), estimator, FakeInputBackend())
+    deps.display = display
+    deps.preprocess = lambda image: np.full_like(image, 7)
+
+    run(deps, NO_PERSISTENCE, max_frames=3)
+
+    assert len(estimator.images) == 3
+    assert all((img == 7).all() for img in estimator.images)  # pose vê a imagem tratada
+    assert all(not img.any() for img in display.images)  # janela mostra o frame cru
+
+
+def test_without_preprocess_estimator_gets_raw_frame() -> None:
+    clock = FakeClock()
+    estimator = ImageSpyEstimator()
+    deps = make_deps(clock, ClockedSource(clock, 2), estimator, FakeInputBackend())
+    assert deps.preprocess is None
+
+    run(deps, NO_PERSISTENCE, max_frames=2)
+
+    assert all(not img.any() for img in estimator.images)

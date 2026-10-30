@@ -136,6 +136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from inmotion.input.hotkeys import WindowsHotkeys
     from inmotion.input.keyboard_mouse import KeyboardMouseBackend
     from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError
+    from inmotion.vision.preprocess import Preprocessor
 
     safety_config = config.safety
     backend = KeyboardMouseBackend()
@@ -174,6 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             pose_filter=pose_filter_from_config(config.filters),
             exit_zone=config.exit_zone,
             config=config,
+            preprocess=Preprocessor(config.preprocess).apply,
         )
         if profile is not None:
             deps.profile = profile

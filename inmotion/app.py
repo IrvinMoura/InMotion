@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 import cv2
@@ -89,6 +90,8 @@ class AppDeps:
     profile: GameProfile = DEFAULT_PROFILE
     config: AppConfig = field(default_factory=AppConfig)  # gestos, base R7, mapper, geometria
     exit_zone: ExitZoneConfig | None = field(default_factory=ExitZoneConfig)
+    # Pré-processamento antes da pose (spec 005, A2: blur gaussiano); None = imagem crua.
+    preprocess: Callable[[NDArray[np.uint8]], NDArray[np.uint8]] | None = None
 
 
 class OpenCvDisplay:
@@ -182,7 +185,12 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
                     _log.info("Saída solicitada (%s)", safety_config.exit_key)
                     break
                 packet = deps.source.read(READ_TIMEOUT_S)
-                pose = deps.estimator.estimate(packet.image, packet.t) if packet else None
+                pose = None
+                if packet is not None:
+                    image = packet.image
+                    if deps.preprocess is not None:
+                        image = deps.preprocess(image)  # só a pose vê; a janela mostra o cru
+                    pose = deps.estimator.estimate(image, packet.t)
                 zone = exit_zone.update(pose, t) if exit_zone is not None else None
                 if zone is not None and zone.inside:
                     tracked.release_all()
