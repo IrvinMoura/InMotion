@@ -8,24 +8,26 @@ import numpy as np
 import pytest
 
 from inmotion.app import AppDeps, run
+from inmotion.config.schema import Binding, GameProfile
 from inmotion.filters.pose_filter import PoseFilter
+from inmotion.gestures.base import GestureKind
 from inmotion.safety import SafetyConfig
 from inmotion.types import FramePacket, PoseFrame
-from inmotion.vision.landmarks import PoseLandmark
 from tests.fakes import (
     FakeClock,
     FakeFrameSource,
     FakeHotkeys,
     FakeInputBackend,
     FakePoseEstimator,
-    make_pose,
 )
+from tests.helpers import ARM_STRAIGHT_FORWARD, make_body
 
 DT = 1 / 30
 # Persistência (min_track_s) desligada: estes testes cobrem outras coisas; ela tem os seus.
 NO_PERSISTENCE = SafetyConfig(min_track_s=0.0)
 HIP_BASE_Y = 300.0
-HIP_UP_Y = 250.0  # sobe 50 px em 480 p: acima de rise·H = 33,3 px
+HIP_UP_Y = 250.0  # sobe 50 px = 0,5 largura de ombro (> theta_on do pulo, 0,25)
+BASE_FRAMES = 20  # a base R7 precisa de K = 15 frames de repouso
 
 
 class SimulatedEstimatorError(Exception):
@@ -49,10 +51,19 @@ class ClockedSource(FakeFrameSource):
 
 
 def hip_pose(y: float, t: float) -> PoseFrame:
-    return make_pose({PoseLandmark.LEFT_HIP: (300.0, y), PoseLandmark.RIGHT_HIP: (340.0, y)}, t=t)
+    return make_body(t=t, hip_y_px=y)
 
 
-JUMP = [hip_pose(y, i * DT) for i, y in enumerate([HIP_BASE_Y, HIP_BASE_Y, HIP_UP_Y, HIP_BASE_Y])]
+def punch_pose(t: float) -> PoseFrame:
+    """Braço direito (ataque, destro) esticado para a câmera: segura ``mouse_left``."""
+    return make_body(t=t, right_arm=ARM_STRAIGHT_FORWARD)
+
+
+JUMP = [
+    hip_pose(y, i * DT)
+    for i, y in enumerate([HIP_BASE_Y] * BASE_FRAMES + [HIP_UP_Y] * 3 + [HIP_BASE_Y] * 8)
+]
+PUNCH = [punch_pose(i * DT) for i in range(60)]
 
 
 def make_deps(
@@ -76,10 +87,10 @@ def make_deps(
 def test_jump_script_produces_press_release() -> None:
     clock = FakeClock()
     backend = FakeInputBackend()
-    source = ClockedSource(clock, 4)
+    source = ClockedSource(clock, len(JUMP))
     estimator = FakePoseEstimator(JUMP)
 
-    code = run(make_deps(clock, source, estimator, backend), NO_PERSISTENCE, max_frames=4)
+    code = run(make_deps(clock, source, estimator, backend), NO_PERSISTENCE, max_frames=len(JUMP))
 
     assert code == 0
     jump_events = [e for e in backend.events if e[1] == "space"]
@@ -92,19 +103,19 @@ def test_jump_script_produces_press_release() -> None:
 def test_f9_exits_and_releases_all() -> None:
     clock = FakeClock()
     backend = FakeInputBackend()
-    source = ClockedSource(clock, 50)
-    estimator = FakePoseEstimator(JUMP[:3] + [JUMP[3]] * 47)
-    # F9 só no 4.º poll: a tecla do pulo está apertada quando o app sai.
-    hotkeys = FakeHotkeys([frozenset(), frozenset(), frozenset(), frozenset({"f9"})])
+    source = ClockedSource(clock, 60)
+    estimator = FakePoseEstimator(PUNCH)
+    # F9 só no 11.º poll: o clique do soco está apertado quando o app sai.
+    hotkeys = FakeHotkeys([frozenset()] * 10 + [frozenset({"f9"})])
     deps = make_deps(clock, source, estimator, backend, hotkeys)
 
     code = run(deps, NO_PERSISTENCE, max_frames=None)
 
     assert code == 0
-    assert ("press", "space") in backend.events
+    assert ("press", "mouse_left") in backend.events
     assert backend.pressed == set()
     assert backend.events[-1][0] == "release"
-    assert len(estimator.calls) < 50  # saiu antes de consumir tudo
+    assert len(estimator.calls) < 60  # saiu antes de consumir tudo
     assert source.closed
     assert estimator.closed
 
@@ -113,30 +124,30 @@ def test_estimator_exception_releases_all() -> None:
     clock = FakeClock()
     backend = FakeInputBackend()
     source = ClockedSource(clock, 10)
-    estimator = FakePoseEstimator([JUMP[0], JUMP[1], JUMP[2], SimulatedEstimatorError("boom")])
+    estimator = FakePoseEstimator([*PUNCH[:6], SimulatedEstimatorError("boom")])
 
     with pytest.raises(SimulatedEstimatorError):
         run(make_deps(clock, source, estimator, backend), NO_PERSISTENCE, max_frames=10)
 
-    assert ("press", "space") in backend.events
+    assert ("press", "mouse_left") in backend.events
     assert backend.pressed == set()
     assert source.closed
     assert estimator.closed
 
 
 class StallingSource(ClockedSource):
-    """No 4.º read o relógio salta 1 s (> timeout do watchdog) e o read "trava" até a thread
+    """No 6.º read o relógio salta 1 s (> timeout do watchdog) e o read "trava" até a thread
     do watchdog soltar as teclas (com limite de 5 s, para o teste não pendurar)."""
 
     def __init__(self, clock: FakeClock, backend: FakeInputBackend) -> None:
-        super().__init__(clock, 4)
+        super().__init__(clock, 6)
         self._backend = backend
         self.reads = 0
         self.released_during_stall: bool | None = None
 
     def read(self, timeout_s: float) -> FramePacket | None:
         self.reads += 1
-        if self.reads < 4:
+        if self.reads < 6:
             return super().read(timeout_s)
         self._clock.advance(1.0)
         deadline = time.monotonic() + 5.0
@@ -150,11 +161,11 @@ def test_watchdog_releases_keys_while_loop_is_stalled() -> None:
     clock = FakeClock()
     backend = FakeInputBackend()
     source = StallingSource(clock, backend)
-    estimator = FakePoseEstimator([JUMP[0], JUMP[1], JUMP[2]])
+    estimator = FakePoseEstimator(PUNCH[:5])
 
-    run(make_deps(clock, source, estimator, backend), NO_PERSISTENCE, max_frames=4)
+    run(make_deps(clock, source, estimator, backend), NO_PERSISTENCE, max_frames=6)
 
-    assert ("press", "space") in backend.events
+    assert ("press", "mouse_left") in backend.events
     assert source.released_during_stall is True  # soltou enquanto o read ainda estava preso
     assert backend.pressed == set()
 
@@ -176,18 +187,12 @@ def test_default_deps_use_one_euro_filter() -> None:
 
 
 def punch_in_exit_zone(t: float) -> PoseFrame:
-    """Braço direito em "soco" (ρ ≈ 0,24, pulso acima do quadril) com o pulso na zona."""
-    return make_pose(
-        {
-            PoseLandmark.RIGHT_SHOULDER: (200.0, 220.0),
-            PoseLandmark.RIGHT_ELBOW: (90.0, 140.0),
-            PoseLandmark.RIGHT_WRIST: (64.0, 120.0),  # (0,10; 0,25) normalizado
-            PoseLandmark.RIGHT_HIP: (220.0, 360.0),
-            PoseLandmark.LEFT_WRIST: (400.0, 400.0),
-            PoseLandmark.LEFT_HIP: (300.0, 360.0),
-        },
-        t=t,
-    )
+    """Braço direito esticado para a câmera (soco) com o pulso na zona de saída.
+
+    O pulso fica em (64, 120) px = (0,10; 0,25) normalizado: o ombro direito está 50 px à
+    esquerda do quadril e 150 px acima dele (``k = 250 px/m``).
+    """
+    return make_body(t=t, hip_x_px=114.0, hip_y_px=270.0, right_arm=ARM_STRAIGHT_FORWARD)
 
 
 def test_hand_held_in_exit_zone_exits_without_clicking() -> None:
@@ -213,12 +218,12 @@ def test_same_pose_clicks_when_exit_zone_disabled() -> None:
     """Controle: sem a zona, a mesma pose é um soco (o teste acima não é vazio)."""
     clock = FakeClock()
     backend = FakeInputBackend()
-    source = ClockedSource(clock, 5)
-    estimator = FakePoseEstimator([punch_in_exit_zone(i * DT) for i in range(5)])
+    source = ClockedSource(clock, 6)
+    estimator = FakePoseEstimator([punch_in_exit_zone(i * DT) for i in range(6)])
     deps = make_deps(clock, source, estimator, backend)
     deps.exit_zone = None
 
-    run(deps, NO_PERSISTENCE, max_frames=5)
+    run(deps, NO_PERSISTENCE, max_frames=6)
 
     assert ("press", "mouse_left") in backend.events
     assert backend.pressed == set()
@@ -247,15 +252,14 @@ def test_watchdog_timeout_comes_from_safety_config(monkeypatch: pytest.MonkeyPat
 def test_profile_bindings_choose_the_keys() -> None:
     clock = FakeClock()
     backend = FakeInputBackend()
-    deps = make_deps(clock, ClockedSource(clock, 4), FakePoseEstimator(JUMP), backend)
-    deps.bindings = {"jump": "w"}  # sem attack/use: esses gestos não existem
+    deps = make_deps(clock, ClockedSource(clock, 10), FakePoseEstimator(PUNCH[:10]), backend)
+    deps.profile = GameProfile("teste", {"attack": Binding("w", GestureKind.HOLD)})
 
-    run(deps, NO_PERSISTENCE, max_frames=4)
+    run(deps, NO_PERSISTENCE, max_frames=10)
 
-    assert [e for e in backend.events if e[1] in ("w", "space")] == [
-        ("press", "w"),
-        ("release", "w"),
-    ]
+    assert ("press", "w") in backend.events  # o gesto attack aperta a tecla do perfil
+    assert ("press", "mouse_left") not in backend.events
+    assert backend.pressed == set()
 
 
 def test_pose_filter_from_config_selects_kind() -> None:

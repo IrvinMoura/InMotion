@@ -102,3 +102,42 @@ def test_pending_keys_exposed_and_tap_hold_validation() -> None:
     for bad in (0.0, -0.1, float("nan"), float("inf")):
         with pytest.raises(ValueError, match="tap_hold_s"):
             MapperParams(tap_hold_s=bad)
+
+
+def test_punch_survives_pause_resume() -> None:
+    """CA6b: soco mantido + F8 duas vezes -> ``mouse_left`` solto e re-apertado após N frames."""
+    from inmotion.fps import FpsMeter
+    from inmotion.gestures.factory import build_body_gestures
+    from inmotion.pipeline import Pipeline
+    from inmotion.safety import SafetyConfig, SafetyManager
+    from tests.helpers import ARM_STRAIGHT_FORWARD, make_body
+
+    fake = FakeInputBackend()
+    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(min_track_s=0.0))
+    profile = GameProfile("teste", {"attack": Binding("mouse_left", GestureKind.HOLD)})
+    pipeline = Pipeline(safety, build_body_gestures({"attack"}), FpsMeter(), profile=profile)
+    dt = 1 / 30
+    frame = 0
+
+    def step(n: int) -> None:
+        nonlocal frame
+        for _ in range(n):
+            t = frame * dt
+            pipeline.step(make_body(t=t, right_arm=ARM_STRAIGHT_FORWARD), t)
+            frame += 1
+
+    def left() -> list[tuple[str, str]]:
+        return [e for e in fake.events if e[1] == "mouse_left"]  # release_all solta os 3 botões
+
+    step(10)
+    assert left() == [("press", "mouse_left")]
+    safety.on_hotkeys(frozenset({"f8"}))  # pausa: solta tudo
+    step(3)
+    assert left() == [("press", "mouse_left"), ("release", "mouse_left")]
+    safety.on_hotkeys(frozenset())
+    safety.on_hotkeys(frozenset({"f8"}))  # retoma
+    step(2)  # N = 3: ainda não re-armou
+    assert fake.pressed == set()
+    step(1)
+    assert left()[-1] == ("press", "mouse_left")  # re-apertado após N frames
+    assert left().count(("press", "mouse_left")) == 2

@@ -12,33 +12,30 @@ from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
+from inmotion.app import DEFAULT_PROFILE
 from inmotion.fps import FpsMeter
-from inmotion.gestures.legacy import LegacyGesture, LegacyJump, LegacyPunch
+from inmotion.gestures.factory import build_body_gestures
 from inmotion.input.backend import InputBackend
 from inmotion.pipeline import Pipeline
 from inmotion.recorder import load_recording
 from inmotion.replay import ReplayResult, run_replay
 from inmotion.safety import SafetyConfig, SafetyManager, TrackedInput
-from inmotion.vision.landmarks import Side
 
 logger = logging.getLogger("replay")
 
 
-def build_legacy_pipeline(
+def build_pipeline(
     backend: InputBackend, config: SafetyConfig | None = None
 ) -> tuple[Pipeline, SafetyManager]:
-    """Mesmos gestos e teclas do ``main.py`` legado, para usuário destro.
+    """Mesmos gestos, teclas e árbitro do app com o perfil padrão (Minecraft, destro).
 
     Sem ``config``, usa a mesma ``SafetyConfig()`` padrão do app (persistência inclusa).
     """
     config = config if config is not None else SafetyConfig()
     safety = SafetyManager(TrackedInput(backend, config.always_release), config)
-    gestures: list[LegacyGesture] = [
-        LegacyJump("space"),
-        LegacyPunch(Side.RIGHT, "mouse_left"),
-        LegacyPunch(Side.LEFT, "mouse_right"),
-    ]
-    return Pipeline(safety, gestures, FpsMeter()), safety
+    gestures = build_body_gestures(DEFAULT_PROFILE.bindings)
+    pipeline = Pipeline(safety, gestures, FpsMeter(), profile=DEFAULT_PROFILE)
+    return pipeline, safety
 
 
 def summarize(frames: int, duration_s: float, result: ReplayResult) -> list[str]:
@@ -61,7 +58,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         logger.error("falha ao ler a gravação: %s", exc)
         return 1
-    result = run_replay(recording, build_legacy_pipeline)
+    result = run_replay(recording, build_pipeline)
     for line in summarize(int(recording.t.shape[0]), recording.duration_s, result):
         logger.info(line)
     return 0

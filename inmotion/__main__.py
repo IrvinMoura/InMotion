@@ -124,7 +124,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(config.logging.level, config.logging.file)
     # Imports tardios: `--help` não carrega OpenCV nem MediaPipe.
     from inmotion.app import (
-        LEGACY_GESTURE_NAMES,
         AppDeps,
         OpenCvDisplay,
         pose_filter_from_config,
@@ -133,21 +132,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     from inmotion.capture.camera import Camera
     from inmotion.clock import MonotonicClock
     from inmotion.config.schema import validate_profile
+    from inmotion.gestures.factory import BODY_GESTURE_NAMES
     from inmotion.input.hotkeys import WindowsHotkeys
     from inmotion.input.keyboard_mouse import KeyboardMouseBackend
     from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError
 
     safety_config = config.safety
     backend = KeyboardMouseBackend()
-    bindings = None
     if profile is not None:
         try:
-            validate_profile(profile, LEGACY_GESTURE_NAMES, backend.supported_keys())
+            validate_profile(profile, BODY_GESTURE_NAMES, backend.supported_keys())
         except ConfigError as exc:
             _log.error("Perfil de jogo inválido: %s", exc)
             return EXIT_USAGE
         _log.info("Perfil de jogo: %s", profile.name)
-        bindings = {name: b.input for name, b in profile.bindings.items()}
     # O modelo é checado ANTES de abrir a câmera: sem ele, nada de hardware é tocado.
     try:
         estimator = MediaPipePoseEstimator(config.pose)
@@ -176,8 +174,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             pose_filter=pose_filter_from_config(config.filters),
             exit_zone=config.exit_zone,
         )
-        if bindings is not None:
-            deps.bindings = bindings
+        if profile is not None:
+            deps.profile = profile
     except BaseException:
         # Falhou antes do run(): quem fecha a câmera e o estimador somos nós.
         camera.close()

@@ -1,39 +1,64 @@
-"""Spec 002 T5 — Pipeline.step: segurança -> gestos (só em ACTIVE) -> FPS."""
+"""Spec 002 T5 / 008 T9 — Pipeline.step: segurança -> contexto -> gestos -> árbitro -> mapper."""
+
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
+from inmotion.config.schema import Binding, GameProfile
 from inmotion.filters import FloatArray
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
+from inmotion.gestures.base import Direction, GestureKind, GestureParams
+from inmotion.gestures.body import BodyGesture, FeatureGesture
+from inmotion.gestures.factory import build_body_gestures
+from inmotion.gestures.features import FrameContext
 from inmotion.input.backend import MOUSE_BUTTONS
 from inmotion.pipeline import Pipeline
 from inmotion.safety import SafetyConfig, SafetyManager, SafetyState, TrackedInput
 from inmotion.types import PoseFrame
+from inmotion.vision.landmarks import PoseLandmark
 from tests.fakes import FakeInputBackend, make_pose
+from tests.helpers import ARM_HANGING, ARM_STRAIGHT_FORWARD, make_body
+
+SPY_PARAMS = GestureParams(0.5, 0.25, Direction.ABOVE, debounce_frames=1)
+SPY_PROFILE = GameProfile("teste", {"spy": Binding("space", GestureKind.HOLD)})
 
 
-class SpyGesture:
-    """Gesto de teste: guarda as chamadas e aperta uma tecla a cada ``update``."""
+class SpyGesture(FeatureGesture):
+    """Gesto de teste: sempre ativo; guarda o ``t`` e o x do landmark 0 de cada contexto."""
 
     def __init__(self) -> None:
+        super().__init__("spy", GestureKind.HOLD, SPY_PARAMS, self._probe)
         self.updates: list[float] = []
+        self.seen_x: list[float] = []
         self.resets = 0
 
-    def update(self, pose: PoseFrame, out: TrackedInput) -> None:
-        self.updates.append(pose.t)
-        out.press("space")
+    def _probe(self, ctx: FrameContext) -> float:
+        self.updates.append(ctx.t)
+        self.seen_x.append(float(ctx.pose.landmarks[0, 0]))
+        return 1.0
 
     def reset(self) -> None:
         self.resets += 1
+        super().reset()
+
+
+def build(
+    gestures: list[BodyGesture],
+    profile: GameProfile = SPY_PROFILE,
+    config: SafetyConfig | None = None,
+    pose_filter: PoseFilter | None = None,
+) -> tuple[Pipeline, SafetyManager, FakeInputBackend]:
+    fake = FakeInputBackend()
+    config = config or SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
+    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), config)
+    pipeline = Pipeline(safety, gestures, FpsMeter(window=30), pose_filter, profile=profile)
+    return pipeline, safety, fake
 
 
 def make_pipeline(spy: SpyGesture) -> tuple[Pipeline, SafetyManager, FakeInputBackend]:
-    fake = FakeInputBackend()
-    safety = SafetyManager(
-        TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
-    )
-    return Pipeline(safety, [spy], FpsMeter(window=30)), safety, fake
+    return build([spy])
 
 
 def test_step_runs_gestures_only_when_active() -> None:
@@ -135,32 +160,15 @@ class ConstantTemporalFilter:
         self.resets += 1
 
 
-class PoseRecordingGesture:
-    """Gesto de teste: guarda o x do landmark 0 que recebeu."""
-
-    def __init__(self) -> None:
-        self.seen_x: list[float] = []
-
-    def update(self, pose: PoseFrame, out: TrackedInput) -> None:
-        self.seen_x.append(float(pose.landmarks[0, 0]))
-
-    def reset(self) -> None:
-        pass
-
-
-def make_filtered_pipeline() -> tuple[Pipeline, PoseRecordingGesture, list[ConstantTemporalFilter]]:
+def make_filtered_pipeline() -> tuple[Pipeline, SpyGesture, list[ConstantTemporalFilter]]:
     inner: list[ConstantTemporalFilter] = []
 
     def factory() -> ConstantTemporalFilter:
         inner.append(ConstantTemporalFilter())
         return inner[-1]
 
-    safety = SafetyManager(
-        TrackedInput(FakeInputBackend(), MOUSE_BUTTONS),
-        SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0),
-    )
-    gesture = PoseRecordingGesture()
-    pipeline = Pipeline(safety, [gesture], FpsMeter(window=30), PoseFilter(factory))
+    gesture = SpyGesture()
+    pipeline, _, _ = build([gesture], pose_filter=PoseFilter(factory))
     return pipeline, gesture, inner
 
 
@@ -188,32 +196,25 @@ def test_pose_filter_reset_on_lost() -> None:
 
 # --- Bug do checklist 003 T8: pose "fantasma" ao sair do quadro deixa o pulo preso ---
 # Ao sair do quadro, o MediaPipe ainda devolveu uma pose (pontos num canto, visibilidade
-# baixa). Como a pose não era None, o app não entrou em LOST: o pulo legado viu os quadris
-# "subirem", segurou o espaço e, sem LOST, nada soltou a tecla nem recalibrou a base.
+# baixa). Como a pose não era None, o app não entrou em LOST: o pulo viu os quadris "subirem"
+# e, sem LOST, nada soltou a tecla nem recalibrou a base R7. Com os gestos da spec 008 o pulo
+# é um tap (PULSE) sobre a base adaptativa; a asserção é a mesma: o espaço nunca é apertado.
 
 DT = 1 / 30
 SIZE = (640, 480)
 HIP_BASE_Y = 300.0
-HIP_UP_Y = 250.0  # 50 px acima da base: passa do rise·H = 33,3 px
+HIP_UP_Y = 250.0  # 50 px acima da base = 0,5 largura de ombro (> theta_on do pulo, 0,25)
 GHOST_VISIBILITY = 0.05
+JUMP_PROFILE = GameProfile("teste", {"jump": Binding("space", GestureKind.TRIGGER)})
 
 
-def _hips(y: float, t: float, visibility: float = 1.0) -> PoseFrame:
-    from inmotion.vision.landmarks import PoseLandmark
-
-    points = {PoseLandmark.LEFT_HIP: (300.0, y), PoseLandmark.RIGHT_HIP: (340.0, y)}
-    vis = dict.fromkeys(range(33), visibility)
-    return make_pose(points, size=SIZE, t=t, visibility=vis)
+def _body(y: float, t: float, visibility: float = 1.0) -> PoseFrame:
+    return make_body(t=t, hip_y_px=y, visibility=visibility)
 
 
 def _jump_pipeline() -> tuple[Pipeline, FakeInputBackend]:
-    from inmotion.gestures.legacy import LegacyJump
-
-    fake = FakeInputBackend()
-    safety = SafetyManager(
-        TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
-    )
-    return Pipeline(safety, [LegacyJump()], FpsMeter(window=30)), fake
+    pipeline, _, fake = build(build_body_gestures({"jump"}), JUMP_PROFILE)
+    return pipeline, fake
 
 
 def _run(pipeline: Pipeline, poses: list[PoseFrame]) -> None:
@@ -223,45 +224,120 @@ def _run(pipeline: Pipeline, poses: list[PoseFrame]) -> None:
 
 def test_ghost_pose_after_leaving_frame_does_not_hold_jump() -> None:
     pipeline, fake = _jump_pipeline()
-    poses = [_hips(HIP_BASE_Y, i * DT) for i in range(10)]
-    poses += [_hips(120.0, (10 + i) * DT, GHOST_VISIBILITY) for i in range(30)]  # 1 s
+    poses = [_body(HIP_BASE_Y, i * DT) for i in range(20)]  # base R7 (K = 15)
+    poses += [_body(120.0, (20 + i) * DT, GHOST_VISIBILITY) for i in range(30)]  # 1 s
     _run(pipeline, poses)
+    assert ("press", "space") not in fake.events
     assert "space" not in fake.pressed
 
 
 def test_returning_at_new_distance_after_ghost_does_not_hold_jump() -> None:
-    """Volta ao quadro com os quadris em outra altura (mais perto/longe): sem pulo preso."""
+    """Volta ao quadro com os quadris em outra altura (mais perto/longe): sem pulo."""
     pipeline, fake = _jump_pipeline()
-    poses = [_hips(HIP_BASE_Y, i * DT) for i in range(10)]
-    poses += [_hips(120.0, (10 + i) * DT, GHOST_VISIBILITY) for i in range(30)]
-    poses += [_hips(HIP_UP_Y, (40 + i) * DT) for i in range(30)]  # parado, só mais alto
+    poses = [_body(HIP_BASE_Y, i * DT) for i in range(20)]
+    poses += [_body(120.0, (20 + i) * DT, GHOST_VISIBILITY) for i in range(30)]
+    poses += [_body(HIP_UP_Y, (50 + i) * DT) for i in range(40)]  # parado, só mais alto
     _run(pipeline, poses)
+    assert ("press", "space") not in fake.events
     assert "space" not in fake.pressed
 
 
-def test_real_jump_still_presses_and_releases() -> None:
-    """Controle: pulo de verdade (tudo visível) aperta e solta o espaço."""
+def test_real_jump_taps_space_through_the_mapper() -> None:
+    """Controle: pulo de verdade (tudo visível) = um tap de espaço (TRIGGER -> mapper)."""
     pipeline, fake = _jump_pipeline()
-    ys = [HIP_BASE_Y] * 3 + [HIP_UP_Y] * 3 + [HIP_BASE_Y] * 3
-    _run(pipeline, [_hips(y, i * DT) for i, y in enumerate(ys)])
+    ys = [HIP_BASE_Y] * 20 + [HIP_UP_Y] * 4 + [HIP_BASE_Y] * 6
+    _run(pipeline, [_body(y, i * DT) for i, y in enumerate(ys)])
     assert fake.events == [("press", "space"), ("release", "space")]
+
+
+def test_tap_is_released_by_time_even_without_pose() -> None:
+    """O tap vence por tempo mesmo sem pose válida (ainda dentro do timeout de LOST)."""
+    pipeline, _, fake = build(build_body_gestures({"jump"}), JUMP_PROFILE)
+    ys = [HIP_BASE_Y] * 20 + [HIP_UP_Y] * 3
+    _run(pipeline, [_body(y, i * DT) for i, y in enumerate(ys)])
+    assert fake.pressed == {"space"}  # tap em andamento
+    pipeline.step(None, 23 * DT)  # 0,033 s depois: pose ausente, ainda ACTIVE
+    pipeline.step(None, 25 * DT)  # 0,1 s >= tap_hold_s
+    assert fake.pressed == set()
+
+
+def test_pending_tap_is_dropped_on_pause() -> None:
+    """Pausa solta tudo (release_all) e o mapper esquece o tap: nada é re-apertado."""
+    pipeline, safety, fake = build(build_body_gestures({"jump"}), JUMP_PROFILE)
+    ys = [HIP_BASE_Y] * 20 + [HIP_UP_Y] * 3
+    _run(pipeline, [_body(y, i * DT) for i, y in enumerate(ys)])
+    assert fake.pressed == {"space"}
+    safety.on_hotkeys(frozenset({"f8"}))
+    pipeline.step(_body(HIP_UP_Y, 23 * DT), 23 * DT)
+    assert fake.pressed == set()
+    n_events = len(fake.events)
+    for i in range(24, 40):  # ainda pausado
+        pipeline.step(_body(HIP_UP_Y, i * DT), i * DT)
+    assert len(fake.events) == n_events
 
 
 def test_hips_out_of_frame_counts_as_lost() -> None:
     """Opção A (custo aceito): sem quadris visíveis (muito perto) -> LOST e nada apertado."""
-    from inmotion.vision.landmarks import PoseLandmark
-
     spy = SpyGesture()
     pipeline, _, fake = make_pipeline(spy)
-    hidden = {PoseLandmark.LEFT_HIP: 0.1, PoseLandmark.RIGHT_HIP: 0.1}
     res = None
     for i in range(10):
-        res = pipeline.step(make_pose({}, t=i * DT, visibility=hidden), i * DT)
+        body = make_body(t=i * DT)
+        landmarks = body.landmarks.copy()
+        landmarks[[PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP], 3] = 0.1
+        res = pipeline.step(replace(body, landmarks=landmarks), i * DT)
     assert res is not None
     assert spy.updates == []  # gestos nunca rodaram com o tronco incompleto
     assert res.safety_state is SafetyState.LOST
     assert res.pose is not None  # o overlay ainda mostra os pontos
     assert fake.pressed == set()
+
+
+# --- Spec 008 T9: árbitro e combo ---
+
+BOTH_PROFILE = GameProfile(
+    "teste",
+    {
+        "attack": Binding("mouse_left", GestureKind.HOLD),
+        "use": Binding("mouse_right", GestureKind.HOLD),
+    },
+)
+
+
+def _arms(right: bool, left: bool, i: int) -> PoseFrame:
+    """Braço direito e/ou esquerdo esticado para a câmera; o outro pendurado."""
+    return make_body(
+        t=i * DT,
+        right_arm=ARM_STRAIGHT_FORWARD if right else ARM_HANGING,
+        left_arm=ARM_STRAIGHT_FORWARD if left else ARM_HANGING,
+    )
+
+
+def test_one_arm_clicks_attack() -> None:
+    """Controle: com um braço só (o direito = ataque, destro), o clique acontece."""
+    pipeline, _, fake = build(build_body_gestures({"attack", "use"}), BOTH_PROFILE)
+    _run(pipeline, [_arms(True, False, i) for i in range(10)])
+    assert fake.events == [("press", "mouse_left")]
+
+
+def test_both_arms_suppress_clicks() -> None:
+    """Dois braços esticados juntos: o combo ``both_arms`` só suprime, nenhum clique."""
+    pipeline, _, fake = build(build_body_gestures({"attack", "use"}), BOTH_PROFILE)
+    _run(pipeline, [_arms(True, True, i) for i in range(10)])
+    assert fake.events == []
+
+
+def test_second_arm_cancels_first_click_and_lowering_it_restores() -> None:
+    pipeline, _, fake = build(build_body_gestures({"attack", "use"}), BOTH_PROFILE)
+    frames = [_arms(True, False, i) for i in range(6)]
+    frames += [_arms(True, True, i) for i in range(6, 12)]
+    frames += [_arms(True, False, i) for i in range(12, 18)]
+    _run(pipeline, frames)
+    assert fake.events == [
+        ("press", "mouse_left"),
+        ("release", "mouse_left"),  # o segundo braço suprime o ataque
+        ("press", "mouse_left"),  # e ao baixá-lo o ataque volta
+    ]
 
 
 def test_min_torso_visibility_validation() -> None:
@@ -286,10 +362,9 @@ GHOST_RUNS = (
 
 def _persistent_pipeline(min_track_s: float = 1.0) -> tuple[Pipeline, SpyGesture, FakeInputBackend]:
     spy = SpyGesture()
-    fake = FakeInputBackend()
     config = SafetyConfig(lost_timeout_s=0.2, min_track_s=min_track_s)
-    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), config)
-    return Pipeline(safety, [spy], FpsMeter(window=30)), spy, fake
+    pipeline, _, fake = build([spy], config=config)
+    return pipeline, spy, fake
 
 
 def test_flickering_ghost_from_recording_never_activates() -> None:
@@ -298,7 +373,7 @@ def test_flickering_ghost_from_recording_never_activates() -> None:
     for has_pose, n in GHOST_RUNS:
         for _ in range(n):
             t = i * DT
-            pose = make_pose({}, size=SIZE, t=t) if has_pose else None  # tudo visível
+            pose = make_body(t=t) if has_pose else None  # tudo visível
             pipeline.step(pose, t)
             i += 1
     assert spy.updates == []  # os gestos nunca rodaram com o fantasma
@@ -308,7 +383,7 @@ def test_flickering_ghost_from_recording_never_activates() -> None:
 def test_continuous_pose_activates_after_min_track_s() -> None:
     pipeline, spy, _ = _persistent_pipeline(min_track_s=1.0)
     for i in range(45):  # 1,5 s
-        pipeline.step(make_pose({}, size=SIZE, t=i * DT), i * DT)
+        pipeline.step(make_body(t=i * DT), i * DT)
     assert spy.updates  # ligou
     assert min(spy.updates) == pytest.approx(1.0, abs=DT)  # e só depois de 1 s
 
@@ -316,10 +391,10 @@ def test_continuous_pose_activates_after_min_track_s() -> None:
 def test_interruption_restarts_min_track_count() -> None:
     pipeline, spy, _ = _persistent_pipeline(min_track_s=1.0)
     for i in range(25):  # 0,83 s com pose
-        pipeline.step(make_pose({}, size=SIZE, t=i * DT), i * DT)
+        pipeline.step(make_body(t=i * DT), i * DT)
     pipeline.step(None, 25 * DT)  # um quadro sem pose zera a contagem
     for i in range(26, 50):  # mais 0,8 s: ainda não chegou a 1 s contínuo
-        pipeline.step(make_pose({}, size=SIZE, t=i * DT), i * DT)
+        pipeline.step(make_body(t=i * DT), i * DT)
     assert spy.updates == []
 
 

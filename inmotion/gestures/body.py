@@ -45,7 +45,7 @@ class FeatureGesture:
         feature: Callable[[FrameContext], float | None],
     ) -> None:
         self.name = name
-        self.kind = kind
+        self.kind: GestureKind = kind
         self._gesture = Gesture(name, kind, params)
         self._feature = feature
         self._value: float | None = None

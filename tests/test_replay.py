@@ -8,44 +8,44 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from inmotion.app import DEFAULT_PROFILE
 from inmotion.fps import FpsMeter
-from inmotion.gestures.legacy import LegacyJump
 from inmotion.input.backend import MOUSE_BUTTONS, InputBackend
 from inmotion.pipeline import Pipeline, StepResult
 from inmotion.recorder import Recorder, load_recording
 from inmotion.recording import Recording, RecordingMeta
 from inmotion.replay import RecordingInputBackend, run_replay
-from inmotion.safety import SafetyConfig, SafetyManager, TrackedInput
+from inmotion.safety import SafetyConfig, SafetyManager
 from inmotion.types import PoseFrame
-from tests.fakes import FakeInputBackend, make_pose
-from tools.replay import build_legacy_pipeline, main
+from tests.fakes import FakeInputBackend
+from tests.helpers import make_body
+from tools.replay import build_pipeline, main
 
 SIZE = (640, 480)
-HIPS = (23, 24)
-WRISTS = (15, 16)
-# A fixture tem 0,35 s, menos que a persistência padrão (min_track_s = 1 s): desligada aqui.
-build = partial(build_legacy_pipeline, config=SafetyConfig(min_track_s=0.0))
+DT = 1 / 30
+# A fixture tem ~1,2 s, mais que a persistência padrão (min_track_s = 1 s) só no fim: desligada.
+build = partial(build_pipeline, config=SafetyConfig(min_track_s=0.0))
 
 
-def hip_pose(y: float) -> PoseFrame:
-    # punhos baixos (abaixo dos quadris): nenhum soco dispara, só o pulo
-    points = dict.fromkeys(HIPS, (320.0, y))
-    points.update(dict.fromkeys(WRISTS, (320.0, 470.0)))
-    return make_pose(points, size=SIZE)
+def body(y: float) -> PoseFrame:
+    return make_body(hip_y_px=y)  # braços pendurados: nenhum soco dispara, só o pulo
 
 
-# Base em y=400; pulo em y=300 (sobe > rise·H); volta; perde a pose; volta; pula e termina
-# com a tecla apertada (o replay tem de soltar no fim).
-FRAMES: list[tuple[float, PoseFrame | None]] = [
-    (0.00, hip_pose(400)),
-    (0.05, hip_pose(400)),
-    (0.10, hip_pose(300)),
-    (0.15, hip_pose(300)),
-    (0.20, hip_pose(400)),
-    (0.25, None),
-    (0.30, hip_pose(400)),
-    (0.35, hip_pose(300)),
+# Base R7 em y=300 (20 quadros, K = 15); pulo (sobe 50 px = 0,5 largura de ombro); volta;
+# perde a pose; volta; pula e termina com o tap apertado (o replay tem de soltar no fim).
+YS: list[float | None] = [
+    *([300.0] * 20),
+    *([250.0] * 3),
+    *([300.0] * 5),
+    None,
+    *([300.0] * 4),
+    *([250.0] * 3),
 ]
+FRAMES: list[tuple[float, PoseFrame | None]] = [
+    (i * DT, None if y is None else body(y)) for i, y in enumerate(YS)
+]
+T_FIRST_PRESS = 21 * DT  # 2.º quadro acima de theta_on (debounce N = 2)
+T_LAST = (len(FRAMES) - 1) * DT
 
 
 def make_meta() -> RecordingMeta:
@@ -101,8 +101,7 @@ def test_replay_matches_live_pipeline() -> None:
     result = run_replay(rec, build)
 
     fake = FakeInputBackend()
-    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(min_track_s=0.0))
-    pipeline = Pipeline(safety, [LegacyJump("space")], FpsMeter())
+    pipeline, safety = build(fake)
     with safety.guard():
         for t, pose in rec.poses():
             pipeline.step(pose, t)
@@ -113,19 +112,19 @@ def test_replay_matches_live_pipeline() -> None:
 
 def test_replay_timestamps_come_from_recording() -> None:
     result = run_replay(synthetic_recording(), build)
-    assert {t for t, _, _ in result.inputs} <= {t for t, _ in FRAMES}
-    assert result.inputs[0] == (0.10, "press", "space")
+    assert {t for t, _ in FRAMES} >= {t for t, _, _ in result.inputs}
+    assert result.inputs[0] == (T_FIRST_PRESS, "press", "space")
+    assert result.inputs[1] == (24 * DT, "release", "space")  # tap de 80 ms
 
 
 def test_replay_releases_everything_at_end() -> None:
     result = run_replay(synthetic_recording(), build)
     # release_all() solta P ∪ botões do mouse (sempre), ordenado; tudo em t = último frame
-    tail = [r for r in result.inputs if r[0] == 0.35]
-    assert tail[0] == (0.35, "press", "space")
-    assert [r[2] for r in tail[1:]] == sorted(["space", *MOUSE_BUTTONS])
-    assert all(kind == "release" for _, kind, _ in tail[1:])
+    tail = [r for r in result.inputs if r[0] == T_LAST]
+    assert [r[2] for r in tail] == sorted(["space", *MOUSE_BUTTONS])
+    assert all(kind == "release" for _, kind, _ in tail)
     spaces = [kind for _, kind, key in result.inputs if key == "space"]
-    assert spaces.count("press") == spaces.count("release")
+    assert spaces == ["press", "release", "press", "release"]
 
 
 class BoomError(Exception):
@@ -142,16 +141,16 @@ def test_replay_releases_on_exception() -> None:
 
         class Exploding(Pipeline):
             def step(self, pose: PoseFrame | None, t: float) -> StepResult:
-                if t >= 0.15:
+                if t >= T_LAST:
                     raise BoomError
                 return inner.step(pose, t)
 
-        return Exploding(safety, [], FpsMeter()), safety
+        return Exploding(safety, [], FpsMeter(), profile=DEFAULT_PROFILE), safety
 
     with pytest.raises(BoomError):
         run_replay(synthetic_recording(), exploding_build)
     space = [(kind, key) for _, kind, key in captured[0].records if key == "space"]
-    assert space == [("press", "space"), ("release", "space")]
+    assert space == [("press", "space"), ("release", "space")] * 2
 
 
 def test_snapshots_only_when_requested() -> None:
@@ -172,8 +171,9 @@ def test_tool_main_returns_zero(tmp_path: Path, caplog: pytest.LogCaptureFixture
     path = record(tmp_path / "s.npz")
     with caplog.at_level("INFO", logger="replay"):
         assert main(["--recording", str(path)]) == 0
-    assert "frames: 8" in caplog.text
-    # o tool usa a config padrão do app: 0,35 s de pose não passa da persistência de 1 s
+    assert f"frames: {len(FRAMES)}" in caplog.text
+    # o tool usa a config padrão do app: só os quadros após min_track_s = 1 s valem; o pulo
+    # da fixture (20 quadros de base) vem antes, então não aperta nada
     assert "space:" not in caplog.text
 
 

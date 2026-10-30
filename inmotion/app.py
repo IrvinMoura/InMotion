@@ -8,21 +8,21 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from inmotion.config.schema import FilterConfig
+from inmotion.config.schema import Binding, FilterConfig, GameProfile
 from inmotion.exit_zone import ExitZone, ExitZoneConfig
 from inmotion.filters.ema import Ema
 from inmotion.filters.one_euro import OneEuro
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
-from inmotion.gestures.legacy import LegacyGesture, LegacyJump, LegacyPunch
-from inmotion.input.backend import HotkeySource, InputBackend, KeyName
+from inmotion.gestures.base import GestureKind
+from inmotion.gestures.factory import build_body_gestures
+from inmotion.input.backend import HotkeySource, InputBackend
 from inmotion.overlay import render
 from inmotion.pipeline import Pipeline, StepResult
 from inmotion.ports import Clock, Display, FrameSource, PoseEstimator
@@ -33,7 +33,6 @@ from inmotion.safety import (
     TrackedInput,
     register_atexit,
 )
-from inmotion.vision.landmarks import Side
 from inmotion.watchdog import Watchdog
 
 _log = logging.getLogger(__name__)
@@ -44,14 +43,19 @@ FPS_WINDOW = 30
 WINDOW_NAME = "InMotion"
 _THREAD_JOIN_S = 1.0
 
-# Mesmas teclas e lados do protótipo (usuário destro): ataque = braço direito, botão
-# esquerdo; usar item = braço esquerdo, botão direito. Valem quando não há perfil de jogo.
-DEFAULT_BINDINGS: Mapping[str, KeyName] = {
-    "jump": "space",
-    "attack": "mouse_left",
-    "use": "mouse_right",
-}
-LEGACY_GESTURE_NAMES = frozenset(DEFAULT_BINDINGS)  # gestos legados (somem na spec 008)
+# Perfil usado quando não há ``--game``: o do Minecraft (usuário destro: ataque = braço
+# direito, botão esquerdo; usar item = braço esquerdo, botão direito). Um teste confere que
+# é igual a ``config/games/minecraft.yaml``.
+DEFAULT_PROFILE = GameProfile(
+    "minecraft",
+    {
+        "attack": Binding("mouse_left", GestureKind.HOLD),
+        "use": Binding("mouse_right", GestureKind.HOLD),
+        "jump": Binding("space", GestureKind.TRIGGER),
+        "crouch": Binding("shift", GestureKind.HOLD),
+        "walk": Binding("w", GestureKind.HOLD),
+    },
+)
 
 
 def pose_filter_from_config(config: FilterConfig) -> PoseFilter | None:
@@ -81,7 +85,7 @@ class AppDeps:
     clock: Clock
     display: Display | None
     pose_filter: PoseFilter | None = field(default_factory=default_pose_filter)
-    bindings: Mapping[str, KeyName] = field(default_factory=lambda: dict(DEFAULT_BINDINGS))
+    profile: GameProfile = DEFAULT_PROFILE
     exit_zone: ExitZoneConfig | None = field(default_factory=ExitZoneConfig)
 
 
@@ -123,18 +127,6 @@ def _close_quietly(name: str, obj: FrameSource | PoseEstimator | Display | None)
         _log.exception("Falha ao fechar %s", name)
 
 
-def legacy_gestures(bindings: Mapping[str, KeyName]) -> list[LegacyGesture]:
-    """Gestos legados cujo nome tem tecla no perfil (sem binding, o gesto não existe)."""
-    gestures: list[LegacyGesture] = []
-    if "jump" in bindings:
-        gestures.append(LegacyJump(bindings["jump"]))
-    if "attack" in bindings:
-        gestures.append(LegacyPunch(Side.RIGHT, bindings["attack"]))
-    if "use" in bindings:
-        gestures.append(LegacyPunch(Side.LEFT, bindings["use"]))
-    return gestures
-
-
 def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = None) -> int:
     """Loop principal. Devolve 0 na saída normal (F9, janela fechada, zona de saída ou
     ``max_frames``).
@@ -148,8 +140,10 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
     """
     tracked = TrackedInput(deps.backend, safety_config.always_release)
     safety = SafetyManager(tracked, safety_config)
-    gestures = legacy_gestures(deps.bindings)
-    pipeline = Pipeline(safety, gestures, FpsMeter(window=FPS_WINDOW), deps.pose_filter)
+    gestures = build_body_gestures(deps.profile.bindings)
+    pipeline = Pipeline(
+        safety, gestures, FpsMeter(window=FPS_WINDOW), deps.pose_filter, profile=deps.profile
+    )
     watchdog = Watchdog(safety_config.watchdog_timeout_s)
     exit_zone = ExitZone(deps.exit_zone) if deps.exit_zone is not None else None
     register_atexit(safety)
