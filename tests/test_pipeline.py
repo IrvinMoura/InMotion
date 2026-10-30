@@ -181,3 +181,65 @@ def test_pose_filter_reset_on_lost() -> None:
 
     pipeline.step(None, 0.1)  # perdeu a pose
     assert image_filter.resets == 1
+
+
+# --- Bug do checklist 003 T8: pose "fantasma" ao sair do quadro deixa o pulo preso ---
+# Ao sair do quadro, o MediaPipe ainda devolveu uma pose (pontos num canto, visibilidade
+# baixa). Como a pose não era None, o app não entrou em LOST: o pulo legado viu os quadris
+# "subirem", segurou o espaço e, sem LOST, nada soltou a tecla nem recalibrou a base.
+
+DT = 1 / 30
+SIZE = (640, 480)
+HIP_BASE_Y = 300.0
+HIP_UP_Y = 250.0  # 50 px acima da base: passa do rise·H = 33,3 px
+GHOST_VISIBILITY = 0.05
+BUG_XFAIL = pytest.mark.xfail(strict=True, reason="bug do checklist 003 T8, correção pendente")
+
+
+def _hips(y: float, t: float, visibility: float = 1.0) -> PoseFrame:
+    from inmotion.vision.landmarks import PoseLandmark
+
+    points = {PoseLandmark.LEFT_HIP: (300.0, y), PoseLandmark.RIGHT_HIP: (340.0, y)}
+    vis = dict.fromkeys(range(33), visibility)
+    return make_pose(points, size=SIZE, t=t, visibility=vis)
+
+
+def _jump_pipeline() -> tuple[Pipeline, FakeInputBackend]:
+    from inmotion.gestures.legacy import LegacyJump
+
+    fake = FakeInputBackend()
+    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2))
+    return Pipeline(safety, [LegacyJump()], FpsMeter(window=30)), fake
+
+
+def _run(pipeline: Pipeline, poses: list[PoseFrame]) -> None:
+    for pose in poses:
+        pipeline.step(pose, pose.t)
+
+
+@BUG_XFAIL
+def test_ghost_pose_after_leaving_frame_does_not_hold_jump() -> None:
+    pipeline, fake = _jump_pipeline()
+    poses = [_hips(HIP_BASE_Y, i * DT) for i in range(10)]
+    poses += [_hips(120.0, (10 + i) * DT, GHOST_VISIBILITY) for i in range(30)]  # 1 s
+    _run(pipeline, poses)
+    assert "space" not in fake.pressed
+
+
+@BUG_XFAIL
+def test_returning_at_new_distance_after_ghost_does_not_hold_jump() -> None:
+    """Volta ao quadro com os quadris em outra altura (mais perto/longe): sem pulo preso."""
+    pipeline, fake = _jump_pipeline()
+    poses = [_hips(HIP_BASE_Y, i * DT) for i in range(10)]
+    poses += [_hips(120.0, (10 + i) * DT, GHOST_VISIBILITY) for i in range(30)]
+    poses += [_hips(HIP_UP_Y, (40 + i) * DT) for i in range(30)]  # parado, só mais alto
+    _run(pipeline, poses)
+    assert "space" not in fake.pressed
+
+
+def test_real_jump_still_presses_and_releases() -> None:
+    """Controle: pulo de verdade (tudo visível) aperta e solta o espaço."""
+    pipeline, fake = _jump_pipeline()
+    ys = [HIP_BASE_Y] * 3 + [HIP_UP_Y] * 3 + [HIP_BASE_Y] * 3
+    _run(pipeline, [_hips(y, i * DT) for i, y in enumerate(ys)])
+    assert fake.events == [("press", "space"), ("release", "space")]
