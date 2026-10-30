@@ -42,9 +42,9 @@ class RecordingInputBackend:
 class ReplayResult:
     """Saída de um replay.
 
-    ``events`` fica vazio enquanto os gestos forem os legados (que apertam teclas direto,
-    sem emitir ``GestureEvent``); passa a ser preenchido com a spec 008. Até lá, a
-    comparação e as métricas usam ``inputs``. ``snapshots`` só existe se pedido.
+    ``events`` segue vazio: o ``Pipeline`` da spec 008 ainda não expõe os ``GestureEvent``
+    do frame (pendente para a 010/011); a comparação e as métricas usam ``inputs``.
+    ``snapshots`` só existe se pedido.
     """
 
     events: tuple[GestureEvent, ...]

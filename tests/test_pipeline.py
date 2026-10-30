@@ -4,6 +4,8 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from inmotion.config.schema import Binding, GameProfile
 from inmotion.filters import FloatArray
@@ -11,7 +13,7 @@ from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
 from inmotion.gestures.base import Direction, GestureKind, GestureParams
 from inmotion.gestures.body import BodyGesture, FeatureGesture
-from inmotion.gestures.factory import build_body_gestures
+from inmotion.gestures.factory import BODY_GESTURE_NAMES, build_body_gestures
 from inmotion.gestures.features import FrameContext
 from inmotion.input.backend import MOUSE_BUTTONS
 from inmotion.pipeline import Pipeline
@@ -19,7 +21,7 @@ from inmotion.safety import SafetyConfig, SafetyManager, SafetyState, TrackedInp
 from inmotion.types import PoseFrame
 from inmotion.vision.landmarks import PoseLandmark
 from tests.fakes import FakeInputBackend, make_pose
-from tests.helpers import ARM_HANGING, ARM_STRAIGHT_FORWARD, make_body
+from tests.helpers import ARM_HANGING, ARM_STRAIGHT_FORWARD, Arm, make_body
 
 SPY_PARAMS = GestureParams(0.5, 0.25, Direction.ABOVE, debounce_frames=1)
 SPY_PROFILE = GameProfile("teste", {"spy": Binding("space", GestureKind.HOLD)})
@@ -404,3 +406,99 @@ def test_min_track_s_default_and_validation() -> None:
     for bad in (-0.1, float("nan"), float("inf")):
         with pytest.raises(ValueError, match="min_track_s"):
             SafetyConfig(min_track_s=bad)
+
+
+# --- Spec 008 T11: E3 de ponta a ponta com poses aleatórias ---
+
+ALL_KEYS_PROFILE = GameProfile(
+    "teste",
+    {
+        "attack": Binding("mouse_left", GestureKind.HOLD),
+        "use": Binding("mouse_right", GestureKind.HOLD),
+        "jump": Binding("space", GestureKind.TRIGGER),
+        "crouch": Binding("shift", GestureKind.HOLD),
+        "walk": Binding("w", GestureKind.HOLD),
+    },
+)
+PROFILE_KEYS = {b.input for b in ALL_KEYS_PROFILE.bindings.values()}
+
+
+def _random_pose(seed: int, mode: int, t: float) -> PoseFrame | None:
+    """0 = sem pose; 1 = ruído puro (visibilidade variável); 2 = corpo com braços/quadril/tronco
+    aleatórios (o que de fato aperta teclas)."""
+    rng = np.random.default_rng(seed)
+    if mode == 0:
+        return None
+    if mode == 1:
+        landmarks = rng.uniform(0.0, 1.0, (33, 5))
+        landmarks[:, 3] = rng.uniform(0.3, 1.0, 33)
+        world = rng.normal(0.0, 0.4, (33, 4))
+        world[:, 3] = landmarks[:, 3]
+        return PoseFrame(t=t, image_size=SIZE, landmarks=landmarks, world=world)
+
+    def arm() -> Arm:
+        pick = int(rng.integers(0, 3))
+        if pick == 0:
+            return ARM_STRAIGHT_FORWARD
+        if pick == 1:
+            return ARM_HANGING
+        up, fore = rng.normal(size=3), rng.normal(size=3)
+        return Arm(
+            (float(up[0]), float(up[1]), float(up[2])),
+            (float(fore[0]), float(fore[1]), float(fore[2])),
+        )
+
+    return make_body(
+        t=t,
+        hip_y_px=float(rng.choice([220.0, 300.0, 380.0])) + float(rng.normal(0.0, 5.0)),
+        lean=float(rng.uniform(-0.6, 0.6)),
+        left_arm=arm(),
+        right_arm=arm(),
+    )
+
+
+@settings(max_examples=60, deadline=None)
+@given(
+    frames=st.lists(
+        st.tuples(
+            st.integers(0, 2**31 - 1),  # semente da pose
+            st.sampled_from([0, 1, 2, 2, 2, 2, 2, 2]),  # modo
+            st.integers(1, 8),  # quantos frames seguidos com a mesma pose
+            st.sampled_from([DT, DT, DT, DT, 0.1, 0.3]),  # intervalo até cada frame
+            st.sampled_from([False, False, False, False, False, False, False, True]),  # F8
+        ),
+        min_size=1,
+        max_size=30,
+    )
+)
+def test_random_poses_never_leave_keys_pressed(
+    frames: list[tuple[int, int, int, float, bool]],
+) -> None:
+    """E3 de ponta a ponta: o Pipeline com poses aleatórias, perda de tracking e pausas nunca
+    deixa tecla presa. Fora de ACTIVE nada fica apertado; só teclas do perfil são apertadas; e
+    ao fim (``guard`` -> ``release_all``) o conjunto de pressionadas é vazio."""
+    gestures = build_body_gestures(BODY_GESTURE_NAMES)
+    pipeline, safety, fake = build(gestures, ALL_KEYS_PROFILE)
+    t = 0.0
+    with safety.guard():
+        for seed, mode, repeat, dt, f8 in frames:
+            for _ in range(repeat):
+                t += dt
+                safety.on_hotkeys(frozenset({"f8"}) if f8 else frozenset())
+                result = pipeline.step(_random_pose(seed, mode, t), t)
+                if result.safety_state is not SafetyState.ACTIVE:
+                    assert fake.pressed == set()
+                assert fake.pressed <= PROFILE_KEYS
+    assert fake.pressed == set()
+    assert safety.input.pressed == frozenset()
+
+
+def test_random_poses_property_is_not_vacuous() -> None:
+    """Controle: com os mesmos geradores, uma sequência de corpo aperta mesmo alguma tecla."""
+    gestures = build_body_gestures(BODY_GESTURE_NAMES)
+    pipeline, _, fake = build(gestures, ALL_KEYS_PROFILE)
+    for i in range(10):
+        pipeline.step(
+            make_body(t=i * DT, right_arm=ARM_STRAIGHT_FORWARD), i * DT
+        )  # soco direito mantido
+    assert "mouse_left" in fake.pressed
