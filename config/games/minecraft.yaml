@@ -1,0 +1,7 @@
+# Perfil do Minecraft (spec 004): gestos atuais (legados, até a spec 008) -> input.
+# kind: hold (segura enquanto o gesto dura) | trigger (um toque) | analog.
+name: minecraft
+bindings:
+  jump:   {input: space,       kind: hold}
+  attack: {input: mouse_left,  kind: hold}
+  use:    {input: mouse_right, kind: hold}

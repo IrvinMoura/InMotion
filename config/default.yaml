@@ -1,0 +1,71 @@
+# Configuração padrão do InMotion (spec 004). Toda seção tem de bater com os padrões das
+# dataclasses em inmotion/config/schema.py (tests/test_config_loader.py confere).
+# Precedência: este arquivo <- config/games/<jogo>.yaml <- perfil do usuário <- --set.
+
+camera:
+  # Provisório: no PC de desenvolvimento o índice 0 é uma câmera virtual (Snap Camera) e a
+  # webcam real é a 1. Fonte única do padrão (app e ferramentas leem daqui).
+  index: 1
+  backend: dshow          # dshow | msmf | any
+  width: 640
+  height: 480
+  fps: 60
+  fourcc: MJPG
+  exposure: null          # null = automática
+
+pose:
+  model_dir: models
+  variant: full           # lite | full | heavy
+  min_detection_confidence: 0.5
+  min_presence_confidence: 0.5
+  min_tracking_confidence: 0.5
+
+preprocess:
+  blur_sigma: 1.0         # pixels (A2); null desliga a suavização
+  sobel_debug: false
+
+filters:
+  kind: one_euro          # none | ema | one_euro
+  ema:                    # R1-R3: 0 < alpha <= 1
+    alpha: 0.5
+    gap_max_s: 0.3
+  one_euro:               # R4: min_cutoff > 0, beta >= 0, d_cutoff > 0
+    min_cutoff: 1.0
+    beta: 0.007
+    d_cutoff: 1.0
+    gap_max_s: 0.3
+
+# Parâmetros por gesto (theta_on, theta_off, direction, debounce_frames, cooldown_s).
+# Vazio por enquanto: os gestos legados têm limiares próprios e saem na spec 008, que
+# preenche esta seção (ex.: gestures.punch_right.theta_on).
+gestures: {}
+
+safety:
+  lost_timeout_s: 0.2     # sem pose por tanto tempo solta todo o input (R5 temporal)
+  pause_key: f8
+  exit_key: f9
+  always_release: [mouse_left, mouse_middle, mouse_right]
+  # Pose só conta com ombros e quadris visíveis; abaixo disso é fantasma ou parcial.
+  min_torso_visibility: 0.5
+  # Pose contínua por este tempo até valer. Pose "fantasma" de objetos durou no máximo
+  # 0,73 s na gravação recordings/fantasma.npz (29/10/2026); 1,0 s dá folga de 1,37x.
+  min_track_s: 1.0
+
+# Zona de saída temporária: mão no retângulo (coordenadas normalizadas da imagem, sem
+# espelhamento) por hold_s segundos encerra o app. Provisória até a spec 009.
+exit_zone:
+  x0: 0.02
+  y0: 0.12
+  x1: 0.22
+  y1: 0.42
+  hold_s: 4.0
+  min_visibility: 0.5
+
+overlay:
+  enabled: true           # false = sem janela de debug (mais FPS)
+
+logging:
+  level: INFO             # DEBUG | INFO | WARNING | ERROR
+  file: null              # nome simples vai para logs/
+
+handedness: right         # right | left

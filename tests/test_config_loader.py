@@ -147,3 +147,41 @@ def test_unknown_game_lists_available(tmp_path: Path) -> None:
         load_config(default, game="minecrft", games_dir=tmp_path / "games")
     assert "minecraft" in str(exc.value)
     assert exc.value.path == "--game"
+
+
+def test_default_yaml_matches_dataclass_defaults() -> None:
+    """CA1: o ``config/default.yaml`` real carrega e é igual aos padrões das dataclasses."""
+    from inmotion.config.schema import AppConfig
+
+    config, profile = load_config()
+    assert config == AppConfig()
+    assert profile is None
+    assert config.camera.index == 1  # padrão provisório (índice 0 = câmera virtual)
+    assert config.safety.min_track_s == 1.0
+    assert config.safety.min_torso_visibility == 0.5
+
+
+def test_minecraft_profile_loads_and_matches_backend_keys() -> None:
+    from inmotion.config.schema import validate_profile
+    from inmotion.gestures.base import GestureKind
+    from inmotion.input.keyboard_mouse import KeyboardMouseBackend
+    from tests.fakes import FakeDirectInput
+
+    _, profile = load_config(game="minecraft")
+    assert profile is not None
+    assert {n: (b.input, b.kind) for n, b in profile.bindings.items()} == {
+        "jump": ("space", GestureKind.HOLD),
+        "attack": ("mouse_left", GestureKind.HOLD),
+        "use": ("mouse_right", GestureKind.HOLD),
+    }
+    keys = KeyboardMouseBackend(api=FakeDirectInput()).supported_keys()
+    validate_profile(profile, frozenset({"jump", "attack", "use"}), keys)
+
+
+def test_camera_default_comes_only_from_yaml() -> None:
+    from inmotion.config.loader import load_camera_config
+
+    assert load_camera_config().index == load_config()[0].camera.index == 1
+    assert load_camera_config(index=3, width=800).width == 800
+    assert load_camera_config(index=3).index == 3
+    assert load_camera_config(index=None).index == 1

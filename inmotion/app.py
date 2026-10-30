@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from inmotion.config.schema import FilterConfig
 from inmotion.exit_zone import ExitZone, ExitZoneConfig
-from inmotion.filters.one_euro import OneEuro, OneEuroParams
+from inmotion.filters.ema import Ema
+from inmotion.filters.one_euro import OneEuro
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
 from inmotion.gestures.legacy import LegacyGesture, LegacyJump, LegacyPunch
-from inmotion.input.backend import HotkeySource, InputBackend
+from inmotion.input.backend import HotkeySource, InputBackend, KeyName
 from inmotion.overlay import render
 from inmotion.pipeline import Pipeline, StepResult
 from inmotion.ports import Clock, Display, FrameSource, PoseEstimator
@@ -43,14 +46,29 @@ WINDOW_NAME = "InMotion"
 _THREAD_JOIN_S = 1.0
 
 # Mesmas teclas e lados do protótipo (usuário destro): ataque = braço direito, botão
-# esquerdo; usar item = braço esquerdo, botão direito.
-_ATTACK_KEY = "mouse_left"
-_USE_ITEM_KEY = "mouse_right"
+# esquerdo; usar item = braço esquerdo, botão direito. Valem quando não há perfil de jogo.
+DEFAULT_BINDINGS: Mapping[str, KeyName] = {
+    "jump": "space",
+    "attack": "mouse_left",
+    "use": "mouse_right",
+}
+LEGACY_GESTURE_NAMES = frozenset(DEFAULT_BINDINGS)  # gestos legados (somem na spec 008)
 
 
-def default_pose_filter() -> PoseFilter:
-    """One Euro (R4) com os parâmetros padrão: um filtro para image e outro para world."""
-    return PoseFilter(lambda: OneEuro(OneEuroParams()))
+def pose_filter_from_config(config: FilterConfig) -> PoseFilter | None:
+    """Um filtro para image e outro para world, do tipo e parâmetros da config (R1-R4)."""
+    if config.kind == "none":
+        return None
+    if config.kind == "ema":
+        ema_params = config.ema
+        return PoseFilter(lambda: Ema(ema_params))
+    one_euro_params = config.one_euro
+    return PoseFilter(lambda: OneEuro(one_euro_params))
+
+
+def default_pose_filter() -> PoseFilter | None:
+    """Filtro com os parâmetros padrão do ``FilterConfig`` (One Euro)."""
+    return pose_filter_from_config(FilterConfig())
 
 
 @dataclass
@@ -64,6 +82,7 @@ class AppDeps:
     clock: Clock
     display: Display | None
     pose_filter: PoseFilter | None = field(default_factory=default_pose_filter)
+    bindings: Mapping[str, KeyName] = field(default_factory=lambda: dict(DEFAULT_BINDINGS))
     exit_zone: ExitZoneConfig | None = field(default_factory=ExitZoneConfig)
 
 
@@ -103,6 +122,18 @@ def _close_quietly(name: str, obj: FrameSource | PoseEstimator | Display | None)
         _log.exception("Falha ao fechar %s", name)
 
 
+def legacy_gestures(bindings: Mapping[str, KeyName]) -> list[LegacyGesture]:
+    """Gestos legados cujo nome tem tecla no perfil (sem binding, o gesto não existe)."""
+    gestures: list[LegacyGesture] = []
+    if "jump" in bindings:
+        gestures.append(LegacyJump(bindings["jump"]))
+    if "attack" in bindings:
+        gestures.append(LegacyPunch(Side.RIGHT, bindings["attack"]))
+    if "use" in bindings:
+        gestures.append(LegacyPunch(Side.LEFT, bindings["use"]))
+    return gestures
+
+
 def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = None) -> int:
     """Loop principal. Devolve 0 na saída normal (F9, janela fechada, zona de saída ou
     ``max_frames``).
@@ -116,11 +147,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
     """
     tracked = TrackedInput(deps.backend, safety_config.always_release)
     safety = SafetyManager(tracked, safety_config)
-    gestures: list[LegacyGesture] = [
-        LegacyJump(),
-        LegacyPunch(Side.RIGHT, _ATTACK_KEY),
-        LegacyPunch(Side.LEFT, _USE_ITEM_KEY),
-    ]
+    gestures = legacy_gestures(deps.bindings)
     pipeline = Pipeline(safety, gestures, FpsMeter(window=FPS_WINDOW), deps.pose_filter)
     watchdog = Watchdog(WATCHDOG_TIMEOUT_S)
     exit_zone = ExitZone(deps.exit_zone) if deps.exit_zone is not None else None

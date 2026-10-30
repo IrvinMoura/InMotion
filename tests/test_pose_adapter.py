@@ -195,12 +195,13 @@ def _wait_for_pose(
 
     from inmotion.capture.camera import Camera
     from inmotion.clock import MonotonicClock
+    from inmotion.config.loader import load_camera_config
     from inmotion.config.schema import CameraConfig
 
     config = PoseConfig(model_dir=_MODEL_DIR)
     if not config.model_path.is_file():
         pytest.skip(f"modelo ausente: {config.model_path}")
-    index = int(os.environ.get(_HW_CAMERA_ENV, str(CameraConfig().index)))
+    index = int(os.environ.get(_HW_CAMERA_ENV, str(load_camera_config().index)))
     clock = MonotonicClock()
     with capsys.disabled():
         print(f"\n>>> {prompt} (câmera {index}, até {_HW_WAIT_S:.0f} s)")

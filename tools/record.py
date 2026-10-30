@@ -30,6 +30,7 @@ from numpy.typing import NDArray
 
 from inmotion.capture.camera import Camera
 from inmotion.clock import MonotonicClock
+from inmotion.config.loader import load_camera_config
 from inmotion.config.schema import CameraConfig, PoseConfig
 from inmotion.input.backend import HotkeySource, KeyName
 from inmotion.input.hotkeys import WindowsHotkeys
@@ -198,7 +199,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighting", choices=LIGHTING_CHOICES, default="outra")
     parser.add_argument("--out", type=Path, required=True, help="caminho do .npz de saída")
     parser.add_argument("--video", type=Path, default=None, help="grava também um .mp4 bruto")
-    parser.add_argument("--camera", type=int, default=CameraConfig().index, help="índice da câmera")
+    parser.add_argument("--camera", type=int, default=None, help="índice da câmera")
     parser.add_argument("--model-dir", type=Path, default=Path("models"))
     parser.add_argument("--model-variant", choices=VARIANTS, default="full")
     return parser
@@ -216,7 +217,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
-    camera_config = CameraConfig(index=args.camera)
+    camera_config = load_camera_config(index=args.camera)
     clock = MonotonicClock()
     meta = RecordingMeta(
         schema_version=SCHEMA_VERSION,

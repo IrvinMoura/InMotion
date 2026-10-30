@@ -174,17 +174,22 @@ def test_config_validation(kwargs: dict[str, Any]) -> None:
 
 
 def test_default_camera_index_is_shared_by_app_and_tools() -> None:
-    """Padrão provisório: índice 1 (o 0 era uma câmera virtual); um só lugar (``CameraConfig``)."""
+    """Padrão provisório: índice 1 (o 0 era uma câmera virtual); fonte única: o YAML.
+
+    App e ferramentas não têm padrão próprio (``None``): resolvem pelo ``default.yaml``.
+    """
     from inmotion.__main__ import build_parser as app_parser
+    from inmotion.__main__ import resolve_config
+    from inmotion.config.loader import load_camera_config
     from tools.bench_pose import _build_parser as bench_parser
     from tools.record import _build_parser as record_parser
 
-    default = CameraConfig().index
-    assert default == 1
-    assert app_parser().parse_args([]).camera == default
-    assert bench_parser().parse_args([]).camera == default
-    record_args = record_parser().parse_args(["--person", "p", "--out", "x.npz"])
-    assert record_args.camera == default
+    assert app_parser().parse_args([]).camera is None
+    assert bench_parser().parse_args([]).camera is None
+    assert record_parser().parse_args(["--person", "p", "--out", "x.npz"]).camera is None
+    assert resolve_config(app_parser().parse_args([]))[0].camera.index == 1
+    assert load_camera_config().index == 1
+    assert CameraConfig().index == 1  # o padrão da dataclass bate com o YAML (testado no loader)
 
 
 def test_backend_names_match_schema() -> None:

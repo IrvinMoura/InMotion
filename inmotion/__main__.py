@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from inmotion.config.schema import CameraConfig
+from inmotion.config.loader import DEFAULT_CONFIG_PATH, load_config
+from inmotion.config.schema import AppConfig, GameProfile
+from inmotion.config.validate import ConfigError
 
 _log = logging.getLogger("inmotion")
 
@@ -18,39 +21,51 @@ EXIT_USAGE = 2  # configuração ou ambiente inválido (modelo ausente, câmera 
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """CLI. Os atalhos (``--camera``...) não têm padrão: o padrão vem do YAML (RF5/RF6)."""
     parser = argparse.ArgumentParser(
         prog="python -m inmotion",
         description="Controla jogos por movimento corporal usando uma webcam.",
     )
     parser.add_argument(
-        "--camera",
-        type=int,
-        default=CameraConfig().index,
-        help=f"índice da câmera (padrão: {CameraConfig().index})",
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        metavar="ARQUIVO",
+        help="arquivo YAML base, no lugar de config/default.yaml",
     )
+    parser.add_argument(
+        "--game",
+        metavar="NOME",
+        help="perfil de jogo em config/games/NOME.yaml (ex.: minecraft)",
+    )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="overrides",
+        metavar="CAMINHO=VALOR",
+        help="sobrescreve um campo, valor lido como YAML (repetível): --set filters.ema.alpha=0.4",
+    )
+    parser.add_argument("--camera", type=int, help="índice da câmera (padrão: camera.index)")
     parser.add_argument(
         "--camera-backend",
         choices=("dshow", "msmf", "any"),
-        default="dshow",
-        help="backend do OpenCV para a câmera (padrão: dshow)",
+        help="backend do OpenCV para a câmera (padrão: camera.backend)",
     )
     parser.add_argument(
         "--model-dir",
         type=Path,
-        default=Path("models"),
-        help="pasta com o modelo pose_landmarker_<variante>.task (padrão: models)",
+        help="pasta com o modelo pose_landmarker_<variante>.task (padrão: pose.model_dir)",
     )
     parser.add_argument(
         "--model-variant",
         choices=("lite", "full", "heavy"),
-        default="full",
-        help="variante do modelo de pose (padrão: full)",
+        help="variante do modelo de pose (padrão: pose.variant)",
     )
     parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
-        default="INFO",
-        help="nível de log (padrão: INFO)",
+        help="nível de log (padrão: logging.level)",
     )
     parser.add_argument(
         "--log-file",
@@ -61,6 +76,29 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-overlay", action="store_true", help="não abre a janela de debug (mais FPS)"
     )
     return parser
+
+
+def flag_overrides(args: argparse.Namespace) -> list[str]:
+    """Traduz os atalhos da CLI em ``caminho=valor`` (valores citados como YAML/JSON)."""
+    pairs: list[tuple[str, object]] = [
+        ("camera.index", args.camera),
+        ("camera.backend", args.camera_backend),
+        ("pose.model_dir", None if args.model_dir is None else str(args.model_dir)),
+        ("pose.variant", args.model_variant),
+        ("logging.level", args.log_level),
+        ("logging.file", args.log_file),
+        ("overlay.enabled", False if args.no_overlay else None),
+    ]
+    return [f"{path}={json.dumps(value)}" for path, value in pairs if value is not None]
+
+
+def resolve_config(args: argparse.Namespace) -> tuple[AppConfig, GameProfile | None]:
+    """Camadas default <- jogo <- CLI; os atalhos vêm antes dos ``--set`` (que vencem)."""
+    return load_config(
+        default_path=args.config,
+        game=args.game,
+        overrides=[*flag_overrides(args), *args.overrides],
+    )
 
 
 def configure_logging(level: str, log_file: str | None) -> None:
@@ -77,29 +115,48 @@ def configure_logging(level: str, log_file: str | None) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    configure_logging(args.log_level, args.log_file)
+    try:
+        config, profile = resolve_config(args)
+    except ConfigError as exc:
+        configure_logging("INFO", None)
+        _log.error("Configuração inválida: %s", exc)
+        return EXIT_USAGE
+    configure_logging(config.logging.level, config.logging.file)
     # Imports tardios: `--help` não carrega OpenCV nem MediaPipe.
-    from inmotion.app import AppDeps, OpenCvDisplay, run
+    from inmotion.app import (
+        LEGACY_GESTURE_NAMES,
+        AppDeps,
+        OpenCvDisplay,
+        pose_filter_from_config,
+        run,
+    )
     from inmotion.capture.camera import Camera
     from inmotion.clock import MonotonicClock
-    from inmotion.config.schema import PoseConfig
+    from inmotion.config.schema import validate_profile
     from inmotion.input.hotkeys import WindowsHotkeys
     from inmotion.input.keyboard_mouse import KeyboardMouseBackend
-    from inmotion.safety import SafetyConfig
     from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError
 
-    safety_config = SafetyConfig()
+    safety_config = config.safety
+    backend = KeyboardMouseBackend()
+    bindings = None
+    if profile is not None:
+        try:
+            validate_profile(profile, LEGACY_GESTURE_NAMES, backend.supported_keys())
+        except ConfigError as exc:
+            _log.error("Perfil de jogo inválido: %s", exc)
+            return EXIT_USAGE
+        _log.info("Perfil de jogo: %s", profile.name)
+        bindings = {name: b.input for name, b in profile.bindings.items()}
     # O modelo é checado ANTES de abrir a câmera: sem ele, nada de hardware é tocado.
     try:
-        estimator = MediaPipePoseEstimator(
-            PoseConfig(model_dir=args.model_dir, variant=args.model_variant)
-        )
+        estimator = MediaPipePoseEstimator(config.pose)
     except ModelNotFoundError as exc:
         _log.error("%s", exc)
         return EXIT_USAGE
 
     clock = MonotonicClock()
-    camera = Camera(CameraConfig(index=args.camera, backend=args.camera_backend), clock)
+    camera = Camera(config.camera, clock)
     try:
         camera.start()
     except OSError as exc:
@@ -112,11 +169,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         deps = AppDeps(
             source=camera,
             estimator=estimator,
-            backend=KeyboardMouseBackend(),
+            backend=backend,
             hotkeys=WindowsHotkeys(frozenset({safety_config.pause_key, safety_config.exit_key})),
             clock=clock,
-            display=None if args.no_overlay else OpenCvDisplay(),
+            display=OpenCvDisplay() if config.overlay.enabled else None,
+            pose_filter=pose_filter_from_config(config.filters),
+            exit_zone=config.exit_zone,
         )
+        if bindings is not None:
+            deps.bindings = bindings
     except BaseException:
         # Falhou antes do run(): quem fecha a câmera e o estimador somos nós.
         camera.close()
