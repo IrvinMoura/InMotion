@@ -9,7 +9,16 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inmotion.gestures.features import forward_reach
+from inmotion.gestures.features import (
+    BaselineParams,
+    BodyBaseline,
+    FrameContext,
+    build_context,
+    crouch_depth,
+    forward_reach,
+    jump_height,
+    lean_forward,
+)
 from inmotion.types import PoseFrame
 from inmotion.vision.geometry import GeometryConfig
 from inmotion.vision.landmarks import PoseLandmark, Side
@@ -89,3 +98,90 @@ def test_wrist_below_hip_gates_to_zero() -> None:
     """Pulso abaixo do quadril: 0,0 mesmo com o antebraço apontando para a câmera."""
     pose = _with_arm_world((0.0, 20.0, 0.0), (0.0, 20.0, -0.25), (0.0, 20.0, -0.5))
     assert forward_reach(pose, Side.RIGHT, GEOMETRY) == 0.0
+
+
+def _ctx(pose: PoseFrame, baseline: BodyBaseline, resting: bool = True) -> FrameContext:
+    return build_context(pose, pose.t, GEOMETRY, baseline, resting)
+
+
+def test_baseline_initial_is_mean_of_k() -> None:
+    """A base inicial é a média de K amostras (não um frame só); antes disso, None."""
+    base = BodyBaseline(BaselineParams(init_frames=4, rate=0.02))
+    assert [base.update(h, True) for h in (10.0, 20.0, 30.0)] == [None, None, None]
+    assert base.update(40.0, True) == pytest.approx(25.0)
+    assert base.value == pytest.approx(25.0)
+
+
+def test_baseline_ema_in_rest() -> None:
+    """R7: b = (1-λ)·b + λ·h."""
+    base = BodyBaseline(BaselineParams(init_frames=1, rate=0.1))
+    assert base.update(100.0, True) == 100.0
+    assert base.update(200.0, True) == pytest.approx(110.0)
+
+
+def test_baseline_frozen_when_not_resting() -> None:
+    """J2: fora do repouso a base não anda, nem conta amostra antes de ter K."""
+    base = BodyBaseline(BaselineParams(init_frames=2, rate=0.5))
+    base.update(100.0, True)
+    assert base.update(500.0, False) is None
+    assert base.update(100.0, True) == 100.0
+    for _ in range(100):
+        assert base.update(900.0, False) == 100.0
+    assert base.update(float("nan"), True) == 100.0  # amostra inválida é ignorada
+
+
+def test_baseline_reset_forgets() -> None:
+    base = BodyBaseline(BaselineParams(init_frames=1))
+    base.update(5.0, True)
+    base.reset()
+    assert base.value is None
+    assert base.update(7.0, True) == 7.0
+
+
+def test_baseline_params_validation() -> None:
+    with pytest.raises(ValueError, match="init_frames"):
+        BaselineParams(init_frames=0)
+    for bad in (0.0, 1.5, float("nan")):
+        with pytest.raises(ValueError, match="rate"):
+            BaselineParams(rate=bad)
+
+
+@given(k=st.floats(min_value=0.5, max_value=3.0), rise=st.floats(min_value=-0.5, max_value=0.8))
+def test_jump_height_scale_invariant(k: float, rise: float) -> None:
+    """J1: j = (b - h)/s não muda com a escala; vale ``rise`` (em larguras de ombro)."""
+    size = (4096, 4096)
+    base = BodyBaseline(BaselineParams(init_frames=1))
+    y0 = 1000.0 * k
+    _ctx(make_body(scale=k, hip_y_px=y0, size=size), base)  # base = y0
+    pose = make_body(scale=k, hip_y_px=y0 - rise * 100.0 * k, size=size)
+    ctx = _ctx(pose, base, resting=False)
+    j = jump_height(ctx)
+    assert j is not None
+    assert j == pytest.approx(rise, abs=1e-9)
+    assert crouch_depth(ctx) == pytest.approx(-rise, abs=1e-9)
+
+
+def test_context_without_skeleton_or_baseline() -> None:
+    base = BodyBaseline(BaselineParams(init_frames=2))
+    ctx = _ctx(make_body(visibility=0.0), base)
+    assert ctx.skeleton is None
+    assert ctx.hip_y_px is None
+    assert ctx.shoulder_px is None
+    assert jump_height(ctx) is None
+    assert crouch_depth(ctx) is None
+    ctx = _ctx(make_body(), base)  # 1 amostra de 2: ainda sem base
+    assert ctx.baseline_px is None
+    assert ctx.hip_y_px == pytest.approx(300.0)
+    assert ctx.shoulder_px == pytest.approx(100.0)
+    assert jump_height(ctx) is None
+
+
+@given(lean=st.floats(min_value=-0.6, max_value=1.2))
+def test_lean_forward_recovers_synthetic_lean(lean: float) -> None:
+    """A9 em profundidade: o ângulo sintético do tronco é recuperado (positivo = frente)."""
+    assert lean_forward(make_body(lean=lean), GEOMETRY) == pytest.approx(lean, abs=1e-9)
+
+
+def test_lean_forward_none_cases() -> None:
+    assert lean_forward(make_body(with_world=False), GEOMETRY) is None
+    assert lean_forward(make_body(visibility=0.0), GEOMETRY) is None
