@@ -35,10 +35,34 @@ filters:
     d_cutoff: 1.0
     gap_max_s: 0.3
 
-# Parâmetros por gesto (theta_on, theta_off, direction, debounce_frames, cooldown_s).
-# Vazio por enquanto: os gestos legados têm limiares próprios e saem na spec 008, que
-# preenche esta seção (ex.: gestures.punch_right.theta_on).
-gestures: {}
+# Parâmetros por gesto (spec 008): theta_on, theta_off, direction, debounce_frames, cooldown_s.
+# Valores INICIAIS, a refinar com dados de gravação (specs 010/011); nunca mude "no olho".
+#   attack/use: alcance frontal r = (z_ombro - z_pulso)/(comprimento do braço), |r| <= 1 (A7/A8)
+#   jump:       (base - h)/s, em larguras de ombro (J1); trigger
+#   crouch:     (h - base)/s, em larguras de ombro
+#   walk:       inclinação do tronco para frente, em rad (A9)
+# direction: above ativa com f > theta_on e solta com f < theta_off (theta_on > theta_off).
+gestures:
+  attack: {theta_on: 0.70, theta_off: 0.55, direction: above, debounce_frames: 3, cooldown_s: 0.0}
+  use:    {theta_on: 0.70, theta_off: 0.55, direction: above, debounce_frames: 3, cooldown_s: 0.0}
+  jump:   {theta_on: 0.25, theta_off: 0.15, direction: above, debounce_frames: 2, cooldown_s: 0.0}
+  crouch: {theta_on: 0.35, theta_off: 0.25, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  walk:   {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+
+# Base adaptativa R7 da altura do quadril (pulo e agachar): média dos primeiros init_frames
+# frames de repouso e depois EMA lenta de taxa rate, só em repouso.
+baseline:
+  init_frames: 15
+  rate: 0.02
+
+# ActionMapper: duração do tap de um gesto trigger (> 1 tick de 50 ms do Minecraft).
+mapper:
+  tap_hold_s: 0.08
+
+# Geometria (A6): visibilidade mínima dos pontos usados e largura mínima de ombros, em px.
+geometry:
+  visibility_threshold: 0.6
+  min_shoulder_px: 10.0
 
 safety:
   lost_timeout_s: 0.2     # sem pose por tanto tempo solta todo o input (R5 temporal)

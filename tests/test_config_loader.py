@@ -164,18 +164,21 @@ def test_default_yaml_matches_dataclass_defaults() -> None:
 def test_minecraft_profile_loads_and_matches_backend_keys() -> None:
     from inmotion.config.schema import validate_profile
     from inmotion.gestures.base import GestureKind
+    from inmotion.gestures.factory import BODY_GESTURE_NAMES
     from inmotion.input.keyboard_mouse import KeyboardMouseBackend
     from tests.fakes import FakeDirectInput
 
     _, profile = load_config(game="minecraft")
     assert profile is not None
     assert {n: (b.input, b.kind) for n, b in profile.bindings.items()} == {
-        "jump": ("space", GestureKind.HOLD),
         "attack": ("mouse_left", GestureKind.HOLD),
         "use": ("mouse_right", GestureKind.HOLD),
+        "jump": ("space", GestureKind.TRIGGER),
+        "crouch": ("shift", GestureKind.HOLD),
+        "walk": ("w", GestureKind.HOLD),
     }
     keys = KeyboardMouseBackend(api=FakeDirectInput()).supported_keys()
-    validate_profile(profile, frozenset({"jump", "attack", "use"}), keys)
+    validate_profile(profile, BODY_GESTURE_NAMES, keys)
 
 
 def test_camera_default_comes_only_from_yaml() -> None:

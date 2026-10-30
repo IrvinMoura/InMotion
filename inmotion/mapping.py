@@ -9,11 +9,14 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from inmotion.config.schema import GameProfile
 from inmotion.gestures.base import EventKind, GestureEvent
 from inmotion.input.backend import KeyName
 from inmotion.safety import TrackedInput
+
+if TYPE_CHECKING:  # só para tipos: o esquema da config importa ``MapperParams`` daqui
+    from inmotion.config.schema import GameProfile
 
 
 @dataclass(frozen=True)

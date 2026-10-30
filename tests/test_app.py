@@ -269,3 +269,36 @@ def test_pose_filter_from_config_selects_kind() -> None:
     assert pose_filter_from_config(FilterConfig(kind="none")) is None
     assert pose_filter_from_config(FilterConfig(kind="ema")) is not None
     assert pose_filter_from_config(FilterConfig(kind="one_euro")) is not None
+
+
+def test_handedness_left_from_config_swaps_the_arms() -> None:
+    """``handedness: left``: o braço esquerdo ataca (``mouse_left``); CA2 de ponta a ponta."""
+    from inmotion.config.schema import AppConfig
+
+    clock = FakeClock()
+    backend = FakeInputBackend()
+    poses = [make_body(t=i * DT, left_arm=ARM_STRAIGHT_FORWARD) for i in range(10)]
+    deps = make_deps(clock, ClockedSource(clock, 10), FakePoseEstimator(poses), backend)
+    deps.config = AppConfig(handedness="left")
+
+    run(deps, NO_PERSISTENCE, max_frames=10)
+
+    assert ("press", "mouse_left") in backend.events
+    assert ("press", "mouse_right") not in backend.events
+
+
+def test_gesture_params_come_from_config() -> None:
+    """``config.gestures`` vale: com debounce 8 o soco de 6 frames não chega a clicar."""
+    from dataclasses import replace
+
+    from inmotion.config.schema import AppConfig
+
+    clock = FakeClock()
+    backend = FakeInputBackend()
+    slow = replace(AppConfig().gestures["attack"], debounce_frames=8)
+    deps = make_deps(clock, ClockedSource(clock, 6), FakePoseEstimator(PUNCH[:6]), backend)
+    deps.config = AppConfig(gestures={**AppConfig().gestures, "attack": slow})
+
+    run(deps, NO_PERSISTENCE, max_frames=6)
+
+    assert ("press", "mouse_left") not in backend.events

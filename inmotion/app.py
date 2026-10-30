@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from inmotion.config.schema import Binding, FilterConfig, GameProfile
+from inmotion.config.schema import AppConfig, Binding, FilterConfig, GameProfile
 from inmotion.exit_zone import ExitZone, ExitZoneConfig
 from inmotion.filters.ema import Ema
 from inmotion.filters.one_euro import OneEuro
@@ -33,6 +33,7 @@ from inmotion.safety import (
     TrackedInput,
     register_atexit,
 )
+from inmotion.vision.landmarks import Side
 from inmotion.watchdog import Watchdog
 
 _log = logging.getLogger(__name__)
@@ -86,6 +87,7 @@ class AppDeps:
     display: Display | None
     pose_filter: PoseFilter | None = field(default_factory=default_pose_filter)
     profile: GameProfile = DEFAULT_PROFILE
+    config: AppConfig = field(default_factory=AppConfig)  # gestos, base R7, mapper, geometria
     exit_zone: ExitZoneConfig | None = field(default_factory=ExitZoneConfig)
 
 
@@ -140,9 +142,22 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
     """
     tracked = TrackedInput(deps.backend, safety_config.always_release)
     safety = SafetyManager(tracked, safety_config)
-    gestures = build_body_gestures(deps.profile.bindings)
+    config = deps.config
+    gestures = build_body_gestures(
+        deps.profile.bindings,
+        Side.RIGHT if config.handedness == "right" else Side.LEFT,
+        config.gestures,
+        config.geometry,
+    )
     pipeline = Pipeline(
-        safety, gestures, FpsMeter(window=FPS_WINDOW), deps.pose_filter, profile=deps.profile
+        safety,
+        gestures,
+        FpsMeter(window=FPS_WINDOW),
+        deps.pose_filter,
+        profile=deps.profile,
+        mapper_params=config.mapper,
+        baseline_params=config.baseline,
+        geometry=config.geometry,
     )
     watchdog = Watchdog(safety_config.watchdog_timeout_s)
     exit_zone = ExitZone(deps.exit_zone) if deps.exit_zone is not None else None

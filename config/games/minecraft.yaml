@@ -1,7 +1,13 @@
-# Perfil do Minecraft (spec 004): gestos atuais (legados, até a spec 008) -> input.
-# kind: hold (segura enquanto o gesto dura) | trigger (um toque) | analog.
+# Perfil do Minecraft (specs 004/008): gesto -> input.
+# kind: hold (segura enquanto o gesto dura) | trigger (um toque de duração mapper.tap_hold_s)
+#       | analog.
+# attack = braço dominante (handedness) esticado para a câmera; use = o outro braço;
+# jump = pulo (tap de espaço); crouch = agachar; walk = inclinar o tronco para frente.
+# Os dois braços esticados juntos só suprimem os cliques (combo both_arms).
 name: minecraft
 bindings:
-  jump:   {input: space,       kind: hold}
   attack: {input: mouse_left,  kind: hold}
   use:    {input: mouse_right, kind: hold}
+  jump:   {input: space,       kind: trigger}
+  crouch: {input: shift,       kind: hold}
+  walk:   {input: w,           kind: hold}

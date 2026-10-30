@@ -21,8 +21,12 @@ from inmotion.exit_zone import ExitZoneConfig
 from inmotion.filters.ema import EmaParams
 from inmotion.filters.one_euro import OneEuroParams
 from inmotion.gestures.base import GestureKind, GestureParams
+from inmotion.gestures.factory import DEFAULT_GESTURE_PARAMS
+from inmotion.gestures.features import BaselineParams
 from inmotion.input.backend import KeyName
+from inmotion.mapping import MapperParams
 from inmotion.safety import SafetyConfig
+from inmotion.vision.geometry import GeometryConfig
 
 CAMERA_BACKENDS: tuple[str, ...] = ("dshow", "msmf", "any")
 POSE_VARIANTS: tuple[str, ...] = ("lite", "full", "heavy")
@@ -136,7 +140,10 @@ class AppConfig:
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     filters: FilterConfig = field(default_factory=FilterConfig)
-    gestures: dict[str, GestureParams] = field(default_factory=dict)
+    gestures: dict[str, GestureParams] = field(default_factory=lambda: dict(DEFAULT_GESTURE_PARAMS))
+    baseline: BaselineParams = field(default_factory=BaselineParams)
+    mapper: MapperParams = field(default_factory=MapperParams)
+    geometry: GeometryConfig = field(default_factory=GeometryConfig)
     exit_zone: ExitZoneConfig = field(default_factory=ExitZoneConfig)
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
