@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Literal
 
 import pytest
 from hypothesis import given
@@ -36,14 +39,12 @@ class WithEma:
     ema: EmaParams = field(default_factory=EmaParams)
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 def test_build_nested_dataclass() -> None:
     cfg = build(Outer, {"inner": {"leaf": {"alpha": 0.25}, "count": 7}, "flag": True})
     assert cfg == Outer(Inner(Leaf(alpha=0.25), count=7), flag=True)
     assert build(Outer, {"inner": {}}) == Outer(Inner())  # padrões preenchidos
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 def test_missing_field_has_path() -> None:
     with pytest.raises(ConfigError) as exc:
         build(Outer, {})
@@ -51,7 +52,6 @@ def test_missing_field_has_path() -> None:
     assert "inner" in str(exc.value)
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 def test_unknown_key_suggests_name() -> None:
     with pytest.raises(ConfigError) as exc:
         build(Outer, {"inner": {"leaf": {"alpah": 0.3}}})
@@ -59,7 +59,6 @@ def test_unknown_key_suggests_name() -> None:
     assert "alpha" in str(exc.value)
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 def test_post_init_error_becomes_config_error_with_path() -> None:
     with pytest.raises(ConfigError) as exc:
         build(WithEma, {"ema": {"alpha": 0.0}}, "filters")
@@ -99,3 +98,103 @@ def test_config_is_frozen() -> None:
     cfg = AppConfig()
     with pytest.raises(FrozenInstanceError):
         cfg.handedness = "left"  # type: ignore[misc]
+
+
+class Color(Enum):
+    RED = 1
+    GREEN = 2
+
+
+@dataclass(frozen=True)
+class Kitchen:
+    flag: bool = False
+    count: int = 1
+    ratio: float = 1.0
+    text: str = "a"
+    where: Path = Path("x")
+    mode: Literal["a", "b"] = "a"
+    maybe: float | None = None
+    keys: frozenset[str] = frozenset()
+    pair: tuple[float, ...] = ()
+    table: dict[str, Leaf] = field(default_factory=dict)
+    color: Color = Color.RED
+
+
+def test_build_converts_all_supported_types() -> None:
+    cfg = build(
+        Kitchen,
+        {
+            "flag": True,
+            "count": 4,
+            "ratio": 2,  # int vale como float
+            "text": "z",
+            "where": "dir/file.task",
+            "mode": "b",
+            "maybe": 0.5,
+            "keys": ["a", "b", "a"],
+            "pair": [1, 2.5],
+            "table": {"g": {"alpha": 0.1}},
+            "color": "green",
+        },
+    )
+    assert cfg == Kitchen(
+        flag=True,
+        count=4,
+        ratio=2.0,
+        text="z",
+        where=Path("dir/file.task"),
+        mode="b",
+        maybe=0.5,
+        keys=frozenset({"a", "b"}),
+        pair=(1.0, 2.5),
+        table={"g": Leaf(alpha=0.1)},
+        color=Color.GREEN,
+    )
+    assert isinstance(cfg.ratio, float)
+    assert build(Kitchen, {"maybe": None}).maybe is None
+
+
+@pytest.mark.parametrize(
+    ("data", "path", "needle"),
+    [
+        ({"flag": 1}, "flag", "bool"),
+        ({"count": 1.5}, "count", "int"),
+        ({"count": True}, "count", "int"),
+        ({"ratio": "x"}, "ratio", "float"),
+        ({"text": 3}, "text", "str"),
+        ({"mode": "c"}, "mode", "'a'"),
+        ({"keys": "a"}, "keys", "lista"),
+        ({"pair": [1, "x"]}, "pair[1]", "float"),
+        ({"table": {"g": 3}}, "table.g", "mapa"),
+        ({"color": "blue"}, "color", "red"),
+        ({"maybe": "x"}, "maybe", "float"),
+    ],
+)
+def test_wrong_type_or_value_reports_path_received_and_expected(
+    data: dict[str, object], path: str, needle: str
+) -> None:
+    with pytest.raises(ConfigError) as exc:
+        build(Kitchen, data)
+    assert exc.value.path == path
+    assert needle in str(exc.value)
+    assert "recebido" in str(exc.value)
+
+
+def test_data_must_be_a_mapping() -> None:
+    with pytest.raises(ConfigError) as exc:
+        build(Outer, {"inner": [1, 2]})
+    assert exc.value.path == "inner"
+
+
+def test_unsupported_type_raises_type_error() -> None:
+    @dataclass(frozen=True)
+    class Bad:
+        value: complex = 0j
+
+    with pytest.raises(TypeError, match="complex"):
+        build(Bad, {"value": 1})
+
+
+def test_non_dataclass_raises_type_error() -> None:
+    with pytest.raises(TypeError, match="dataclass"):
+        build(int, {})  # type: ignore[type-var]
