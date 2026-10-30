@@ -30,6 +30,7 @@ class ConfigError(ValueError):
     def __init__(self, path: str, message: str) -> None:
         super().__init__(f"{path}: {message}" if path else message)
         self.path = path
+        self.message = message
 
 
 def _join(path: str, name: str) -> str:
