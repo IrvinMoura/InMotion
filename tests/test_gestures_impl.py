@@ -112,7 +112,6 @@ def _run_hip(rig: Rig, hip_y: NDArray[np.float64]) -> None:
         rig.step(make_body(t=i * DT, hip_y_px=float(y), right_arm=ARM_HANGING))
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 def test_jump_single_pulse_and_still_none() -> None:
     """CA3: trajetória de pulo -> 1 PULSE; em pé com ruído de 1% de s por 60 s -> 0."""
     rng = np.random.default_rng(0)
@@ -127,7 +126,6 @@ def test_jump_single_pulse_and_still_none() -> None:
     assert jumping.kinds("jump") == [EventKind.PULSE]
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 def test_slow_drift_no_jump() -> None:
     """CA4: deriva lenta (aproximação da câmera) -> nenhum pulo; a base acompanha."""
     rig = Rig([jump_gesture(JUMP)])
@@ -136,3 +134,59 @@ def test_slow_drift_no_jump() -> None:
         frac = i / (n - 1)
         rig.step(make_body(t=i * DT, scale=1.0 + 0.3 * frac, hip_y_px=300.0 - 30.0 * frac))
     assert rig.events == []
+
+
+def test_slow_drift_baseline_follows() -> None:
+    """CA4/J3: a base R7 acompanha a deriva do quadril com defasagem pequena (~v/λ)."""
+    rig = Rig([jump_gesture(JUMP)])
+    n = 20 * 30
+    hip = 300.0
+    for i in range(n):
+        hip = 300.0 - 30.0 * i / (n - 1)
+        rig.step(make_body(t=i * DT, scale=1.0 + 0.3 * i / (n - 1), hip_y_px=hip))
+    assert rig.baseline.value is not None
+    assert abs(rig.baseline.value - hip) < 5.0  # defasagem estacionária v/λ = 2,5 px
+    assert rig.events == []
+
+
+def test_two_jumps_two_pulses() -> None:
+    rig = Rig([jump_gesture(JUMP)])
+    hip = np.full(200, 300.0)
+    hip[50:62] = 250.0
+    hip[120:132] = 250.0
+    _run_hip(rig, hip)
+    assert rig.kinds("jump") == [EventKind.PULSE, EventKind.PULSE]
+
+
+def test_baseline_frozen_during_jump_j2() -> None:
+    """J2: a base fica congelada enquanto o pulo não volta a IDLE."""
+    rig = Rig([jump_gesture(JUMP)])
+    hip = np.full(120, 300.0)
+    hip[50:90] = 250.0  # meio segundo a mais no ar: 40 frames
+    _run_hip(rig, hip)
+    assert rig.kinds("jump") == [EventKind.PULSE]
+    assert rig.baseline.value is not None
+    assert abs(rig.baseline.value - 300.0) < 2.0  # só ~2 frames de arming contaminam
+
+
+def test_no_jump_before_baseline_is_ready() -> None:
+    """RF3: a base é média de K frames; antes de K amostras não há pulo."""
+    rig = Rig([jump_gesture(JUMP)])
+    hip = np.full(40, 300.0)
+    hip[5:15] = 200.0  # quadril "alto" cedo demais: faz parte da média, não é pulo
+    _run_hip(rig, hip)
+    assert rig.events == []
+
+
+def test_jump_threshold_works_at_two_distances() -> None:
+    """J1: o mesmo limiar vale a 1,5 m e a 3 m (escala 2x nos pixels)."""
+    for scale in (1.0, 2.0):
+        rig = Rig([jump_gesture(JUMP)])
+        for i in range(120):
+            lift = 0.5 * 100.0 * scale if 60 <= i < 72 else 0.0
+            rig.step(
+                make_body(
+                    t=i * DT, scale=scale, hip_y_px=600.0 - lift, size=(1280, 960), hip_x_px=640.0
+                )
+            )
+        assert rig.kinds("jump") == [EventKind.PULSE]
