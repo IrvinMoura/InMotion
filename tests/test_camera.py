@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from inmotion.capture.camera import Camera, CameraConfig
+from inmotion.capture.camera import DEFAULT_CAMERA_INDEX, Camera, CameraConfig
 from tests.fakes import FakeCapture, FakeClock
 
 
@@ -140,7 +140,7 @@ def test_exposure_not_set_when_none_and_backend_mapping() -> None:
     cam, calls = make_camera(cap, CameraConfig(backend="any"))
     cam.start()
     try:
-        assert calls == [(0, cv2.CAP_ANY)]
+        assert calls == [(DEFAULT_CAMERA_INDEX, cv2.CAP_ANY)]
         assert cv2.CAP_PROP_EXPOSURE not in cap.props
     finally:
         cam.close()
@@ -170,3 +170,17 @@ def test_start_fails_if_capture_not_opened() -> None:
 def test_config_validation(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ValueError, match=r"deve|inválido"):
         CameraConfig(**kwargs)
+
+
+def test_default_camera_index_is_shared_by_app_and_tools() -> None:
+    """Padrão provisório: índice 1 (o 0 era uma câmera virtual); um só lugar até a spec 004."""
+    from inmotion.__main__ import build_parser as app_parser
+    from tools.bench_pose import _build_parser as bench_parser
+    from tools.record import _build_parser as record_parser
+
+    assert DEFAULT_CAMERA_INDEX == 1
+    assert CameraConfig().index == DEFAULT_CAMERA_INDEX
+    assert app_parser().parse_args([]).camera == DEFAULT_CAMERA_INDEX
+    assert bench_parser().parse_args([]).camera == DEFAULT_CAMERA_INDEX
+    record_args = record_parser().parse_args(["--person", "p", "--out", "x.npz"])
+    assert record_args.camera == DEFAULT_CAMERA_INDEX

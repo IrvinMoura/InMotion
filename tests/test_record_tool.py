@@ -102,5 +102,5 @@ def test_config_hash_is_stable_and_sensitive() -> None:
 
     base = compute_config_hash(CameraConfig(), "full", DEFAULT_LABEL_KEYS)
     assert base == compute_config_hash(CameraConfig(), "full", dict(DEFAULT_LABEL_KEYS))
-    assert base != compute_config_hash(CameraConfig(index=1), "full", DEFAULT_LABEL_KEYS)
+    assert base != compute_config_hash(CameraConfig(index=2), "full", DEFAULT_LABEL_KEYS)
     assert base != compute_config_hash(CameraConfig(), "lite", DEFAULT_LABEL_KEYS)

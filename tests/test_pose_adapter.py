@@ -177,7 +177,7 @@ _HW_WAIT_S = 15.0  # tempo para a pessoa se posicionar
 _HW_READ_TIMEOUT_S = 1.0
 _HW_EMPTY_HOLD_S = 2.0  # cena vazia: sem pessoa por este tempo seguido
 _HW_MIN_FRAMES = 10  # mínimo de frames para checar que o vídeo é ao vivo
-# Índice da webcam real; câmeras virtuais (Snap Camera, NVIDIA Broadcast) podem ocupar o 0.
+# Sobrescreve o índice padrão; câmeras virtuais (Snap Camera, NVIDIA Broadcast) ocupam índices.
 _HW_CAMERA_ENV = "INMOTION_CAMERA"
 _SHOULDERS = (11, 12)
 _MIN_SHOULDER_VISIBILITY = 0.5
@@ -193,13 +193,13 @@ def _wait_for_pose(
     """
     import os
 
-    from inmotion.capture.camera import Camera, CameraConfig
+    from inmotion.capture.camera import DEFAULT_CAMERA_INDEX, Camera, CameraConfig
     from inmotion.clock import MonotonicClock
 
     config = PoseConfig(model_dir=_MODEL_DIR)
     if not config.model_path.is_file():
         pytest.skip(f"modelo ausente: {config.model_path}")
-    index = int(os.environ.get(_HW_CAMERA_ENV, "0"))
+    index = int(os.environ.get(_HW_CAMERA_ENV, str(DEFAULT_CAMERA_INDEX)))
     clock = MonotonicClock()
     with capsys.disabled():
         print(f"\n>>> {prompt} (câmera {index}, até {_HW_WAIT_S:.0f} s)")

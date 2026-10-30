@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 import cv2
 
+from inmotion.capture import DEFAULT_CAMERA_INDEX
 from inmotion.ports import Clock
 from inmotion.types import FramePacket
 
@@ -30,7 +31,7 @@ _THREAD_NAME = "inmotion-camera"
 class CameraConfig:
     """Parâmetros da câmera (os padrões migram para ``config/default.yaml`` na spec 004)."""
 
-    index: int = 0
+    index: int = DEFAULT_CAMERA_INDEX
     backend: Literal["dshow", "msmf", "any"] = "dshow"
     width: int = 640
     height: int = 480

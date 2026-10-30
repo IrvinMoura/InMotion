@@ -8,6 +8,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from inmotion.capture import DEFAULT_CAMERA_INDEX
+
 _log = logging.getLogger("inmotion")
 
 LOG_DIR = Path("logs")
@@ -20,7 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m inmotion",
         description="Controla jogos por movimento corporal usando uma webcam.",
     )
-    parser.add_argument("--camera", type=int, default=0, help="índice da câmera (padrão: 0)")
+    parser.add_argument(
+        "--camera",
+        type=int,
+        default=DEFAULT_CAMERA_INDEX,
+        help=f"índice da câmera (padrão: {DEFAULT_CAMERA_INDEX})",
+    )
     parser.add_argument(
         "--camera-backend",
         choices=("dshow", "msmf", "any"),

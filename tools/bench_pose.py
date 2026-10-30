@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from inmotion.capture.camera import Camera, CameraConfig
+from inmotion.capture.camera import DEFAULT_CAMERA_INDEX, Camera, CameraConfig
 from inmotion.clock import MonotonicClock
 from inmotion.ports import Clock, FrameSource, PoseEstimator
 from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError, PoseConfig
@@ -108,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Benchmark de FPS das variantes do modelo.")
     parser.add_argument("--seconds", type=float, default=10.0, help="duração por variante")
     parser.add_argument("--variants", nargs="+", choices=VARIANTS, default=list(VARIANTS))
-    parser.add_argument("--camera", type=int, default=0, help="índice da câmera")
+    parser.add_argument("--camera", type=int, default=DEFAULT_CAMERA_INDEX, help="índice da câmera")
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--models-dir", type=Path, default=Path("models"))
