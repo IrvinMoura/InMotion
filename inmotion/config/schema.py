@@ -9,15 +9,19 @@ importe ``cv2`` nem ``mediapipe`` por tabela. Os padrões são os de ``config/de
 
 from __future__ import annotations
 
+import difflib
 import math
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from inmotion.config.validate import ConfigError
 from inmotion.exit_zone import ExitZoneConfig
 from inmotion.filters.ema import EmaParams
 from inmotion.filters.one_euro import OneEuroParams
-from inmotion.gestures.base import GestureParams
+from inmotion.gestures.base import GestureKind, GestureParams
+from inmotion.input.backend import KeyName
 from inmotion.safety import SafetyConfig
 
 CAMERA_BACKENDS: tuple[str, ...] = ("dshow", "msmf", "any")
@@ -137,3 +141,57 @@ class AppConfig:
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     handedness: Literal["right", "left"] = "right"
+
+
+@dataclass(frozen=True)
+class Binding:
+    """Liga um gesto a uma tecla/botão: ``kind`` é ``hold``, ``trigger`` ou ``analog``."""
+
+    input: KeyName
+    kind: GestureKind
+
+    def __post_init__(self) -> None:
+        if not self.input:
+            raise ValueError("input não pode ser vazio")
+
+
+@dataclass(frozen=True)
+class GameProfile:
+    """Perfil de jogo: para cada gesto, o input mapeado e o tipo (``config/games/*.yaml``)."""
+
+    name: str
+    bindings: dict[str, Binding]
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name não pode ser vazio")
+
+
+def _suggestion(name: str, options: Collection[str]) -> str:
+    close = difflib.get_close_matches(name, sorted(options), n=1)
+    return f" Você quis dizer {close[0]!r}?" if close else ""
+
+
+def validate_profile(
+    profile: GameProfile, known_gestures: frozenset[str], supported_keys: frozenset[KeyName]
+) -> None:
+    """RF7: todo gesto do perfil existe e toda tecla/botão é suportado pelo backend.
+
+    Raises:
+        ConfigError: com o caminho ``bindings.<gesto>`` ou ``bindings.<gesto>.input``.
+    """
+    for gesture, binding in profile.bindings.items():
+        path = f"bindings.{gesture}"
+        if gesture not in known_gestures:
+            raise ConfigError(
+                path,
+                f"gesto desconhecido {gesture!r}.{_suggestion(gesture, known_gestures)} "
+                f"Gestos conhecidos: {sorted(known_gestures)}",
+            )
+        if binding.input not in supported_keys:
+            hint = _suggestion(binding.input, supported_keys)
+            raise ConfigError(
+                f"{path}.input",
+                f"tecla ou botão não suportado {binding.input!r}.{hint}"
+                " Veja as teclas aceitas pelo backend de input.",
+            )

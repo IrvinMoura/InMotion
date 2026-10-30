@@ -42,6 +42,11 @@ class KeyboardMouseBackend:
         else:
             self._api.keyUp(self._checked(key))
 
+    def supported_keys(self) -> frozenset[KeyName]:
+        """Nomes aceitos por ``press``/``release``: teclas com scancode e botões do mouse."""
+        keyboard = {name for name, code in self._api.KEYBOARD_MAPPING.items() if code is not None}
+        return frozenset(keyboard | set(_MOUSE_BUTTONS))
+
     def _checked(self, key: KeyName) -> KeyName:
         """Garante que a tecla tem scancode; o pydirectinput ignoraria em silêncio."""
         if self._api.KEYBOARD_MAPPING.get(key) is None:

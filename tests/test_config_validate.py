@@ -13,9 +13,12 @@ from hypothesis import strategies as st
 
 from inmotion.config.schema import (
     AppConfig,
+    Binding,
     CameraConfig,
     FilterConfig,
+    GameProfile,
     PoseConfig,
+    validate_profile,
 )
 from inmotion.config.validate import ConfigError, build, deep_merge, parse_override
 from inmotion.filters.ema import EmaParams
@@ -279,3 +282,50 @@ def test_parse_override_errors(text: str) -> None:
     with pytest.raises(ConfigError) as exc:
         parse_override(text)
     assert "--set" in str(exc.value)
+
+
+KNOWN = frozenset({"jump", "attack", "use"})
+KEYS = frozenset({"space", "mouse_left", "mouse_right"})
+
+
+def _profile(bindings: dict[str, object]) -> GameProfile:
+    return build(GameProfile, {"name": "teste", "bindings": bindings})
+
+
+def test_profile_builds_and_validates() -> None:
+    from inmotion.gestures.base import GestureKind
+
+    profile = _profile(
+        {
+            "jump": {"input": "space", "kind": "hold"},
+            "attack": {"input": "mouse_left", "kind": "trigger"},
+        }
+    )
+    assert profile.bindings["jump"] == Binding("space", GestureKind.HOLD)
+    assert profile.bindings["attack"].kind is GestureKind.TRIGGER
+    validate_profile(profile, KNOWN, KEYS)  # não lança
+
+
+def test_profile_rejects_unknown_gesture() -> None:
+    profile = _profile({"jumpp": {"input": "space", "kind": "hold"}})
+    with pytest.raises(ConfigError) as exc:
+        validate_profile(profile, KNOWN, KEYS)
+    assert exc.value.path == "bindings.jumpp"
+    assert "jump" in str(exc.value)  # sugestão
+
+
+def test_profile_rejects_unsupported_key() -> None:
+    profile = _profile({"jump": {"input": "f13", "kind": "hold"}})
+    with pytest.raises(ConfigError) as exc:
+        validate_profile(profile, KNOWN, KEYS)
+    assert exc.value.path == "bindings.jump.input"
+    assert "f13" in str(exc.value)
+
+
+def test_profile_rejects_bad_kind_and_empty_input() -> None:
+    with pytest.raises(ConfigError) as exc:
+        _profile({"jump": {"input": "space", "kind": "segurar"}})
+    assert exc.value.path == "bindings.jump.kind"
+    with pytest.raises(ConfigError) as exc:
+        _profile({"jump": {"input": "", "kind": "hold"}})
+    assert exc.value.path == "bindings.jump.input"
