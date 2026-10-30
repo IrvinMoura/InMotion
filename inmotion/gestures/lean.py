@@ -17,8 +17,8 @@ def lean_gesture(
     """Gesto HOLD (sentido ABOVE) sobre ``lean_forward`` (A9, rad): segura para andar.
 
     Ativa com a inclinação para frente ``> θ_on`` por N frames e solta abaixo de ``θ_off``
-    (R5, R6). Inclinar para trás (valor negativo) nunca ativa. O sinal da feature foi
-    confirmado com o MediaPipe real por ``test_lean_sign_on_hardware``.
+    (R5, R6). Inclinar para trás (valor negativo) nunca ativa. O sinal da feature está
+    a confirmar com o MediaPipe real por ``test_lean_sign_on_hardware`` (``-m hardware``).
     """
     return FeatureGesture(
         "walk", GestureKind.HOLD, params, lambda ctx: lean_forward(ctx.pose, geometry)
