@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from inmotion.types import PoseFrame
 from inmotion.vision.pose import (
     POSE_CONNECTIONS,
     MediaPipePoseEstimator,
@@ -167,3 +168,62 @@ def test_pose_connections_match_mediapipe_topology() -> None:
 
     official = {(c.start, c.end) for c in vision.PoseLandmarksConnections.POSE_LANDMARKS}
     assert set(POSE_CONNECTIONS) == official
+
+
+# --- Hardware (spec 003 T6): webcam + modelo real; rodar com `pytest -m hardware -s` ---
+
+_MODEL_DIR = Path(__file__).resolve().parents[1] / "models"
+_HW_WAIT_S = 15.0  # tempo para a pessoa se posicionar
+_HW_READ_TIMEOUT_S = 1.0
+_SHOULDERS = (11, 12)
+_MIN_SHOULDER_VISIBILITY = 0.5
+
+
+def _wait_for_pose(
+    capsys: pytest.CaptureFixture[str], prompt: str, want_person: bool
+) -> PoseFrame | None:
+    """Lê a webcam até a condição valer (ou o prazo acabar); devolve a última pose lida."""
+    from inmotion.capture.camera import Camera, CameraConfig
+    from inmotion.clock import MonotonicClock
+
+    config = PoseConfig(model_dir=_MODEL_DIR)
+    if not config.model_path.is_file():
+        pytest.skip(f"modelo ausente: {config.model_path}")
+    clock = MonotonicClock()
+    with capsys.disabled():
+        print(f"\n>>> {prompt} (até {_HW_WAIT_S:.0f} s)")
+    camera = Camera(CameraConfig(), clock)
+    camera.start()
+    pose: PoseFrame | None = None
+    try:
+        with MediaPipePoseEstimator(config) as estimator:
+            deadline = clock.now() + _HW_WAIT_S
+            while clock.now() < deadline:
+                packet = camera.read(timeout_s=_HW_READ_TIMEOUT_S)
+                if packet is None:
+                    continue
+                pose = estimator.estimate(packet.image, packet.t)
+                if (pose is not None) == want_person:
+                    break
+    finally:
+        camera.close()
+    return pose
+
+
+@pytest.mark.hardware
+def test_real_model_detects_person(capsys: pytest.CaptureFixture[str]) -> None:
+    """CA5: pessoa em pé -> 33 landmarks e ombros com visibility > 0,5."""
+    pose = _wait_for_pose(capsys, "Fique em pé, de frente para a câmera", want_person=True)
+    assert pose is not None
+    assert pose.landmarks.shape == (33, 5)
+    visibility = pose.landmarks[list(_SHOULDERS), 3]
+    with capsys.disabled():
+        print(f"visibility dos ombros: {visibility}")
+    assert (visibility > _MIN_SHOULDER_VISIBILITY).all()
+
+
+@pytest.mark.hardware
+def test_real_model_empty_scene(capsys: pytest.CaptureFixture[str]) -> None:
+    """CA6: cena sem pessoa -> None."""
+    pose = _wait_for_pose(capsys, "Saia do quadro da câmera", want_person=False)
+    assert pose is None
