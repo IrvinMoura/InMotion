@@ -53,6 +53,7 @@ class Pipeline:
         self._fps = fps
         self._pose_filter = pose_filter
         self._was_active = True  # gestos nascem zerados
+        self._tracked_since: float | None = None  # início da sequência contínua de pose
 
     def step(self, pose: PoseFrame | None, t: float) -> StepResult:
         """on_frame → (se ACTIVE) gestos → FPS. Ao voltar para ACTIVE, reset() nos gestos.
@@ -62,13 +63,24 @@ class Pipeline:
         "fantasma" de baixa visibilidade, que não pode segurar teclas. Os gestos só
         rodam com pose rastreada e em ACTIVE; o ``StepResult`` ainda leva a pose crua
         não rastreada, para o overlay.
+
+        Persistência (debounce R5 no tempo): a pose só vale depois de ``min_track_s``
+        de detecção contínua, ``t − t₀ ≥ min_track_s``, com ``t₀`` o início da sequência
+        atual; um quadro sem pose zera ``t₀``. Fantasmas piscam e nunca chegam lá.
         na volta de LOST/PAUSED para ACTIVE o estado deles é zerado antes do primeiro
         ``update``, pois o ``release_all()`` já soltou as teclas que eles achavam apertadas.
         """
         raw = pose
-        threshold = self._safety.config.min_torso_visibility
-        if pose is not None and not is_visible(pose, TORSO, threshold):
+        config = self._safety.config
+        if pose is not None and not is_visible(pose, TORSO, config.min_torso_visibility):
             pose = None
+        if pose is None:
+            self._tracked_since = None
+        else:
+            if self._tracked_since is None:
+                self._tracked_since = t
+            if t - self._tracked_since < config.min_track_s:
+                pose = None
         self._safety.on_frame(t, pose is not None)
         state = self._safety.state
         active = state is SafetyState.ACTIVE

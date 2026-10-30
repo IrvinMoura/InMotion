@@ -30,6 +30,9 @@ class SafetyConfig:
         min_torso_visibility: visibilidade mínima de ombros e quadris para a pose contar
             como rastreada (``ℓₙ = 1`` na R5). Abaixo disso é pose "fantasma" ou parcial
             e conta como perda de tracking.
+        min_track_s: tempo de pose contínua até ela valer (debounce R5 no tempo). A pose
+            "fantasma" de objetos pisca por no máximo 0,73 s (recordings/fantasma.npz,
+            29/10/2026); 1,0 s dá folga de 1,37×. ``0`` desliga.
     """
 
     lost_timeout_s: float = 0.2
@@ -37,6 +40,7 @@ class SafetyConfig:
     exit_key: KeyName = "f9"
     always_release: frozenset[KeyName] = MOUSE_BUTTONS
     min_torso_visibility: float = 0.5
+    min_track_s: float = 1.0
 
     def __post_init__(self) -> None:
         if not (math.isfinite(self.lost_timeout_s) and self.lost_timeout_s > 0):
@@ -48,6 +52,8 @@ class SafetyConfig:
             raise ValueError(
                 f"min_torso_visibility deve estar em [0, 1]: {self.min_torso_visibility}"
             )
+        if not (math.isfinite(self.min_track_s) and self.min_track_s >= 0):
+            raise ValueError(f"min_track_s deve ser finito e >= 0: {self.min_track_s}")
         if self.pause_key == self.exit_key:
             raise ValueError(f"pause_key e exit_key devem ser diferentes: {self.pause_key!r}")
 

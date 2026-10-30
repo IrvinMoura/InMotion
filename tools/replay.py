@@ -24,9 +24,14 @@ from inmotion.vision.landmarks import Side
 logger = logging.getLogger("replay")
 
 
-def build_legacy_pipeline(backend: InputBackend) -> tuple[Pipeline, SafetyManager]:
-    """Mesmos gestos e teclas do ``main.py`` legado, para usuário destro."""
-    config = SafetyConfig()
+def build_legacy_pipeline(
+    backend: InputBackend, config: SafetyConfig | None = None
+) -> tuple[Pipeline, SafetyManager]:
+    """Mesmos gestos e teclas do ``main.py`` legado, para usuário destro.
+
+    Sem ``config``, usa a mesma ``SafetyConfig()`` padrão do app (persistência inclusa).
+    """
+    config = config if config is not None else SafetyConfig()
     safety = SafetyManager(TrackedInput(backend, config.always_release), config)
     gestures: list[LegacyGesture] = [
         LegacyJump("space"),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,8 @@ from tools.replay import build_legacy_pipeline, main
 SIZE = (640, 480)
 HIPS = (23, 24)
 WRISTS = (15, 16)
+# A fixture tem 0,35 s, menos que a persistência padrão (min_track_s = 1 s): desligada aqui.
+build = partial(build_legacy_pipeline, config=SafetyConfig(min_track_s=0.0))
 
 
 def hip_pose(y: float) -> PoseFrame:
@@ -85,8 +88,8 @@ def synthetic_recording() -> Recording:
 
 def test_replay_is_deterministic() -> None:
     rec = synthetic_recording()
-    first = run_replay(rec, build_legacy_pipeline)
-    second = run_replay(rec, build_legacy_pipeline)
+    first = run_replay(rec, build)
+    second = run_replay(rec, build)
     assert first.inputs == second.inputs
     assert first == second
     assert any(kind == "press" for _, kind, _ in first.inputs)
@@ -95,10 +98,10 @@ def test_replay_is_deterministic() -> None:
 
 def test_replay_matches_live_pipeline() -> None:
     rec = synthetic_recording()
-    result = run_replay(rec, build_legacy_pipeline)
+    result = run_replay(rec, build)
 
     fake = FakeInputBackend()
-    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig())
+    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(min_track_s=0.0))
     pipeline = Pipeline(safety, [LegacyJump("space")], FpsMeter())
     with safety.guard():
         for t, pose in rec.poses():
@@ -109,13 +112,13 @@ def test_replay_matches_live_pipeline() -> None:
 
 
 def test_replay_timestamps_come_from_recording() -> None:
-    result = run_replay(synthetic_recording(), build_legacy_pipeline)
+    result = run_replay(synthetic_recording(), build)
     assert {t for t, _, _ in result.inputs} <= {t for t, _ in FRAMES}
     assert result.inputs[0] == (0.10, "press", "space")
 
 
 def test_replay_releases_everything_at_end() -> None:
-    result = run_replay(synthetic_recording(), build_legacy_pipeline)
+    result = run_replay(synthetic_recording(), build)
     # release_all() solta P ∪ botões do mouse (sempre), ordenado; tudo em t = último frame
     tail = [r for r in result.inputs if r[0] == 0.35]
     assert tail[0] == (0.35, "press", "space")
@@ -132,10 +135,10 @@ class BoomError(Exception):
 def test_replay_releases_on_exception() -> None:
     captured: list[RecordingInputBackend] = []
 
-    def build(backend: InputBackend) -> tuple[Pipeline, SafetyManager]:
+    def exploding_build(backend: InputBackend) -> tuple[Pipeline, SafetyManager]:
         assert isinstance(backend, RecordingInputBackend)
         captured.append(backend)
-        inner, safety = build_legacy_pipeline(backend)
+        inner, safety = build(backend)
 
         class Exploding(Pipeline):
             def step(self, pose: PoseFrame | None, t: float) -> StepResult:
@@ -146,23 +149,23 @@ def test_replay_releases_on_exception() -> None:
         return Exploding(safety, [], FpsMeter()), safety
 
     with pytest.raises(BoomError):
-        run_replay(synthetic_recording(), build)
+        run_replay(synthetic_recording(), exploding_build)
     space = [(kind, key) for _, kind, key in captured[0].records if key == "space"]
     assert space == [("press", "space"), ("release", "space")]
 
 
 def test_snapshots_only_when_requested() -> None:
     rec = synthetic_recording()
-    assert run_replay(rec, build_legacy_pipeline).snapshots is None
-    snaps = run_replay(rec, build_legacy_pipeline, keep_snapshots=True).snapshots
+    assert run_replay(rec, build).snapshots is None
+    snaps = run_replay(rec, build, keep_snapshots=True).snapshots
     assert snaps is not None
     assert len(snaps) == len(FRAMES)
 
 
 def test_roundtrip_record_load_replay(tmp_path: Path) -> None:
     loaded = load_recording(record(tmp_path / "s.npz"))
-    direct = run_replay(synthetic_recording(), build_legacy_pipeline)
-    assert run_replay(loaded, build_legacy_pipeline).inputs == direct.inputs
+    direct = run_replay(synthetic_recording(), build)
+    assert run_replay(loaded, build).inputs == direct.inputs
 
 
 def test_tool_main_returns_zero(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -170,7 +173,8 @@ def test_tool_main_returns_zero(tmp_path: Path, caplog: pytest.LogCaptureFixture
     with caplog.at_level("INFO", logger="replay"):
         assert main(["--recording", str(path)]) == 0
     assert "frames: 8" in caplog.text
-    assert "space: 2 press, 2 release" in caplog.text
+    # o tool usa a config padrão do app: 0,35 s de pose não passa da persistência de 1 s
+    assert "space:" not in caplog.text
 
 
 def test_tool_main_missing_file_returns_one(tmp_path: Path) -> None:

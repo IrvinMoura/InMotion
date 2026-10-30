@@ -22,6 +22,8 @@ from tests.fakes import (
 )
 
 DT = 1 / 30
+# Persistência (min_track_s) desligada: estes testes cobrem outras coisas; ela tem os seus.
+NO_PERSISTENCE = SafetyConfig(min_track_s=0.0)
 HIP_BASE_Y = 300.0
 HIP_UP_Y = 250.0  # sobe 50 px em 480 p: acima de rise·H = 33,3 px
 
@@ -77,7 +79,7 @@ def test_jump_script_produces_press_release() -> None:
     source = ClockedSource(clock, 4)
     estimator = FakePoseEstimator(JUMP)
 
-    code = run(make_deps(clock, source, estimator, backend), SafetyConfig(), max_frames=4)
+    code = run(make_deps(clock, source, estimator, backend), NO_PERSISTENCE, max_frames=4)
 
     assert code == 0
     jump_events = [e for e in backend.events if e[1] == "space"]
@@ -96,7 +98,7 @@ def test_f9_exits_and_releases_all() -> None:
     hotkeys = FakeHotkeys([frozenset(), frozenset(), frozenset(), frozenset({"f9"})])
     deps = make_deps(clock, source, estimator, backend, hotkeys)
 
-    code = run(deps, SafetyConfig(), max_frames=None)
+    code = run(deps, NO_PERSISTENCE, max_frames=None)
 
     assert code == 0
     assert ("press", "space") in backend.events
@@ -114,7 +116,7 @@ def test_estimator_exception_releases_all() -> None:
     estimator = FakePoseEstimator([JUMP[0], JUMP[1], JUMP[2], SimulatedEstimatorError("boom")])
 
     with pytest.raises(SimulatedEstimatorError):
-        run(make_deps(clock, source, estimator, backend), SafetyConfig(), max_frames=10)
+        run(make_deps(clock, source, estimator, backend), NO_PERSISTENCE, max_frames=10)
 
     assert ("press", "space") in backend.events
     assert backend.pressed == set()
@@ -150,7 +152,7 @@ def test_watchdog_releases_keys_while_loop_is_stalled() -> None:
     source = StallingSource(clock, backend)
     estimator = FakePoseEstimator([JUMP[0], JUMP[1], JUMP[2]])
 
-    run(make_deps(clock, source, estimator, backend), SafetyConfig(), max_frames=4)
+    run(make_deps(clock, source, estimator, backend), NO_PERSISTENCE, max_frames=4)
 
     assert ("press", "space") in backend.events
     assert source.released_during_stall is True  # soltou enquanto o read ainda estava preso
@@ -199,7 +201,7 @@ def test_hand_held_in_exit_zone_exits_without_clicking() -> None:
     deps = make_deps(clock, source, estimator, backend)
     deps.exit_zone = ExitZoneConfig(hold_s=4.0)
 
-    code = run(deps, SafetyConfig(), max_frames=n)
+    code = run(deps, NO_PERSISTENCE, max_frames=n)
 
     assert code == 0
     assert 4.0 / DT <= len(estimator.calls) <= 4.0 / DT + 3  # saiu logo após 4 s
@@ -216,7 +218,7 @@ def test_same_pose_clicks_when_exit_zone_disabled() -> None:
     deps = make_deps(clock, source, estimator, backend)
     deps.exit_zone = None
 
-    run(deps, SafetyConfig(), max_frames=5)
+    run(deps, NO_PERSISTENCE, max_frames=5)
 
     assert ("press", "mouse_left") in backend.events
     assert backend.pressed == set()

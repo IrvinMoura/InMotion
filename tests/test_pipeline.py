@@ -30,7 +30,9 @@ class SpyGesture:
 
 def make_pipeline(spy: SpyGesture) -> tuple[Pipeline, SafetyManager, FakeInputBackend]:
     fake = FakeInputBackend()
-    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2))
+    safety = SafetyManager(
+        TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
+    )
     return Pipeline(safety, [spy], FpsMeter(window=30)), safety, fake
 
 
@@ -154,7 +156,8 @@ def make_filtered_pipeline() -> tuple[Pipeline, PoseRecordingGesture, list[Const
         return inner[-1]
 
     safety = SafetyManager(
-        TrackedInput(FakeInputBackend(), MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2)
+        TrackedInput(FakeInputBackend(), MOUSE_BUTTONS),
+        SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0),
     )
     gesture = PoseRecordingGesture()
     pipeline = Pipeline(safety, [gesture], FpsMeter(window=30), PoseFilter(factory))
@@ -207,7 +210,9 @@ def _jump_pipeline() -> tuple[Pipeline, FakeInputBackend]:
     from inmotion.gestures.legacy import LegacyJump
 
     fake = FakeInputBackend()
-    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2))
+    safety = SafetyManager(
+        TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
+    )
     return Pipeline(safety, [LegacyJump()], FpsMeter(window=30)), fake
 
 
@@ -264,3 +269,63 @@ def test_min_torso_visibility_validation() -> None:
     for bad in (-0.1, 1.5, float("nan")):
         with pytest.raises(ValueError, match="min_torso_visibility"):
             SafetyConfig(min_torso_visibility=bad)
+
+
+# --- Persistência (checklist 003 T8): a pose só vale após min_track_s contínuos ---
+# Em recordings/fantasma.npz (29/10/2026) o MediaPipe achou uma "pessoa" no travesseiro com
+# visibilidade de até 0,99, mas piscando: sequências de 1 a 22 quadros (máx. 0,73 s),
+# enquanto a pessoa real ficou 792 quadros seguidos. Sequência real de quadros com e sem
+# pose fantasma, a 30 FPS, entre 16,1 s e 32,7 s da gravação:
+GHOST_RUNS = (
+    (True, 4), (False, 5), (True, 2), (False, 105), (True, 1), (False, 3), (True, 22),
+    (False, 24), (True, 11), (False, 39), (True, 2), (False, 6), (True, 8), (False, 60),
+    (True, 6), (False, 14), (True, 6), (False, 147), (True, 3), (False, 11), (True, 3),
+    (False, 5), (True, 12),
+)  # fmt: skip
+
+
+def _persistent_pipeline(min_track_s: float = 1.0) -> tuple[Pipeline, SpyGesture, FakeInputBackend]:
+    spy = SpyGesture()
+    fake = FakeInputBackend()
+    config = SafetyConfig(lost_timeout_s=0.2, min_track_s=min_track_s)
+    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), config)
+    return Pipeline(safety, [spy], FpsMeter(window=30)), spy, fake
+
+
+def test_flickering_ghost_from_recording_never_activates() -> None:
+    pipeline, spy, fake = _persistent_pipeline()
+    i = 0
+    for has_pose, n in GHOST_RUNS:
+        for _ in range(n):
+            t = i * DT
+            pose = make_pose({}, size=SIZE, t=t) if has_pose else None  # tudo visível
+            pipeline.step(pose, t)
+            i += 1
+    assert spy.updates == []  # os gestos nunca rodaram com o fantasma
+    assert fake.pressed == set()
+
+
+def test_continuous_pose_activates_after_min_track_s() -> None:
+    pipeline, spy, _ = _persistent_pipeline(min_track_s=1.0)
+    for i in range(45):  # 1,5 s
+        pipeline.step(make_pose({}, size=SIZE, t=i * DT), i * DT)
+    assert spy.updates  # ligou
+    assert min(spy.updates) == pytest.approx(1.0, abs=DT)  # e só depois de 1 s
+
+
+def test_interruption_restarts_min_track_count() -> None:
+    pipeline, spy, _ = _persistent_pipeline(min_track_s=1.0)
+    for i in range(25):  # 0,83 s com pose
+        pipeline.step(make_pose({}, size=SIZE, t=i * DT), i * DT)
+    pipeline.step(None, 25 * DT)  # um quadro sem pose zera a contagem
+    for i in range(26, 50):  # mais 0,8 s: ainda não chegou a 1 s contínuo
+        pipeline.step(make_pose({}, size=SIZE, t=i * DT), i * DT)
+    assert spy.updates == []
+
+
+def test_min_track_s_default_and_validation() -> None:
+    assert SafetyConfig().min_track_s == 1.0
+    assert SafetyConfig(min_track_s=0.0).min_track_s == 0.0  # 0 desliga
+    for bad in (-0.1, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="min_track_s"):
+            SafetyConfig(min_track_s=bad)
