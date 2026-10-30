@@ -170,7 +170,10 @@ def deep_merge(*layers: Mapping[str, object]) -> dict[str, object]:
     """Mesclagem recursiva de dicts; a camada mais à direita vence; listas são substituídas.
 
     Propriedades (testadas): associativa, ``{}`` é a identidade e as entradas não mudam.
-    Mapa sobre mapa mescla chave a chave; qualquer outro caso é substituição.
+    Mapa sobre mapa mescla chave a chave; qualquer outro caso é substituição. A
+    associatividade vale para camadas de forma consistente (mesma chave = sempre mapa ou
+    sempre folha), que é o caso do esquema; com formas misturadas a camada à direita
+    simplesmente substitui, e o ``build`` rejeita o tipo errado.
     """
     merged: dict[str, object] = {}
     for layer in layers:

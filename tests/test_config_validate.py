@@ -74,14 +74,30 @@ def test_post_init_error_becomes_config_error_with_path() -> None:
     assert "0.0" in str(exc.value)
 
 
-_leaf_values = st.one_of(st.integers(), st.text(max_size=3), st.booleans(), st.none())
-_layers = st.recursive(
-    st.dictionaries(st.sampled_from("abc"), _leaf_values, max_size=3),
-    lambda inner: st.dictionaries(
-        st.sampled_from("abc"), st.one_of(_leaf_values, inner), max_size=3
-    ),
-    max_leaves=8,
+_leaf_values = st.one_of(
+    st.integers(),
+    st.text(max_size=3),
+    st.booleans(),
+    st.none(),
+    st.lists(st.integers(), max_size=2),
 )
+
+
+def _layer(depth: int) -> st.SearchStrategy[dict[str, object]]:
+    """Camada com forma consistente: ``a``/``b`` sempre folhas, ``m``/``n`` sempre mapas.
+
+    É o caso real (todas as camadas obedecem ao mesmo esquema). Misturar mapa e folha na
+    mesma chave quebra a associatividade (``{a:1} ⊕ 0 ⊕ {b:2}``) e o ``build`` rejeita o
+    tipo errado de qualquer forma.
+    """
+    leaves = st.dictionaries(st.sampled_from(["a", "b"]), _leaf_values, max_size=2)
+    if depth == 0:
+        return leaves
+    maps = st.dictionaries(st.sampled_from(["m", "n"]), _layer(depth - 1), max_size=2)
+    return st.builds(lambda x, y: {**x, **y}, leaves, maps)
+
+
+_layers = _layer(2)
 
 
 @given(a=_layers, b=_layers, c=_layers)
