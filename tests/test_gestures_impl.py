@@ -16,6 +16,7 @@ from inmotion.gestures.base import (
     GestureState,
 )
 from inmotion.gestures.body import BodyGesture, all_idle
+from inmotion.gestures.crouch import crouch_gesture
 from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context
 from inmotion.gestures.jump import jump_gesture
 from inmotion.gestures.punch import punch_gesture, punch_pair
@@ -29,6 +30,7 @@ DT = 1.0 / 30.0
 
 PUNCH = GestureParams(0.70, 0.55, Direction.ABOVE, debounce_frames=3)
 JUMP = GestureParams(0.25, 0.15, Direction.ABOVE, debounce_frames=2)
+CROUCH = GestureParams(0.35, 0.25, Direction.ABOVE, debounce_frames=4)
 
 
 class Rig:
@@ -190,3 +192,44 @@ def test_jump_threshold_works_at_two_distances() -> None:
                 )
             )
         assert rig.kinds("jump") == [EventKind.PULSE]
+
+
+def _crouch_run(rig: Rig, depth_px: dict[range, float], n: int) -> None:
+    """Quadril em 300 px; nos intervalos dados, desce ``depth_px`` (s = 100 px)."""
+    for i in range(n):
+        drop = next((d for r, d in depth_px.items() if i in r), 0.0)
+        rig.step(make_body(t=i * DT, hip_y_px=300.0 + drop))
+
+
+def test_crouch_holds_shift_until_standing() -> None:
+    """CA5: agachar 2 s -> um START (shift pressionado) e um END ao levantar."""
+    rig = Rig([crouch_gesture(CROUCH)])
+    _crouch_run(rig, {range(60, 120): 40.0}, 180)
+    assert rig.kinds("crouch") == [EventKind.START, EventKind.END]
+    start, end = (e for e in rig.events if e.gesture == "crouch")
+    assert 60 * DT < start.t <= 64 * DT  # START após N = 4 frames
+    assert end.t == pytest.approx(120 * DT)  # solta ao levantar
+
+
+def test_crouch_hysteresis_keeps_between_thresholds() -> None:
+    """Entre θ_off (0,25) e θ_on (0,35) o agachar já ativo não solta."""
+    rig = Rig([crouch_gesture(CROUCH)])
+    _crouch_run(rig, {range(30, 60): 40.0, range(60, 90): 30.0}, 120)
+    assert rig.kinds("crouch") == [EventKind.START, EventKind.END]
+    assert rig.events[-1].t == pytest.approx(90 * DT)
+
+
+def test_shallow_dip_does_not_crouch() -> None:
+    rig = Rig([crouch_gesture(CROUCH)])
+    _crouch_run(rig, {range(30, 90): 30.0}, 120)
+    assert rig.events == []
+
+
+def test_long_crouch_does_not_move_baseline() -> None:
+    """Risco do plano: agachado por muito tempo, a base R7 fica congelada."""
+    rig = Rig([crouch_gesture(CROUCH), jump_gesture(JUMP)])
+    _crouch_run(rig, {range(30, 30 + 20 * 30): 40.0}, 30 + 20 * 30)
+    assert rig.baseline.value is not None
+    assert abs(rig.baseline.value - 300.0) < 2.0
+    assert rig.kinds("crouch") == [EventKind.START]
+    assert rig.kinds("jump") == []
