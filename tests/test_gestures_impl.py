@@ -13,11 +13,12 @@ from inmotion.gestures.base import (
     EventKind,
     GestureEvent,
     GestureParams,
+    GestureState,
 )
 from inmotion.gestures.body import BodyGesture, all_idle
 from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context
 from inmotion.gestures.jump import jump_gesture
-from inmotion.gestures.punch import punch_gesture
+from inmotion.gestures.punch import punch_gesture, punch_pair
 from inmotion.types import PoseFrame
 from inmotion.vision.geometry import GeometryConfig
 from inmotion.vision.landmarks import Side
@@ -49,7 +50,6 @@ class Rig:
         return [e.kind for e in self.events if e.gesture == name]
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 def test_straight_punch_starts_bent_down_does_not() -> None:
     """CA1: braço reto à frente -> START; dobrado para baixo -> nada."""
     straight = Rig([punch_gesture("attack", Side.RIGHT, PUNCH, GEOMETRY)])
@@ -61,6 +61,50 @@ def test_straight_punch_starts_bent_down_does_not() -> None:
     for i in range(30):
         bent.step(make_body(t=i * DT, right_arm=ARM_BENT_DOWN))
     assert bent.events == []
+
+
+def test_punch_start_after_n_frames_and_end_on_release() -> None:
+    """Debounce R5 (N = 3) e saída por histerese R6: START no 3º frame, END ao baixar o braço."""
+    rig = Rig([punch_gesture("attack", Side.RIGHT, PUNCH, GEOMETRY)])
+    for i in range(2):
+        rig.step(make_body(t=i * DT, right_arm=ARM_STRAIGHT_FORWARD))
+    assert rig.events == []
+    rig.step(make_body(t=2 * DT, right_arm=ARM_STRAIGHT_FORWARD))
+    assert rig.kinds("attack") == [EventKind.START]
+    rig.step(make_body(t=3 * DT, right_arm=ARM_HANGING))
+    assert rig.kinds("attack") == [EventKind.START, EventKind.END]
+
+
+def test_handedness_maps_arms() -> None:
+    """CA2: destro -> o braço direito ataca e o esquerdo usa item; canhoto inverte."""
+    for handedness, attack_arm, use_arm in (
+        (Side.RIGHT, "right", "left"),
+        (Side.LEFT, "left", "right"),
+    ):
+        for extended, expected in ((attack_arm, "attack"), (use_arm, "use")):
+            rig = Rig(list(punch_pair(handedness, PUNCH, PUNCH, GEOMETRY)))
+            for i in range(5):
+                arms = {f"{extended}_arm": ARM_STRAIGHT_FORWARD}
+                rig.step(make_body(t=i * DT, **arms))
+            assert [(e.gesture, e.kind) for e in rig.events] == [(expected, EventKind.START)]
+
+
+def test_feature_gesture_close_reset_and_value() -> None:
+    gesture = punch_gesture("attack", Side.RIGHT, PUNCH, GEOMETRY)
+    rig = Rig([gesture])
+    for i in range(5):
+        rig.step(make_body(t=i * DT, right_arm=ARM_STRAIGHT_FORWARD))
+    assert gesture.feature_value == pytest.approx(1.0)
+    assert gesture.snapshot().state is GestureState.ACTIVE
+    assert not all_idle([gesture])
+    end = gesture.close(5 * DT)
+    assert end is not None
+    assert end.kind is EventKind.END
+    assert gesture.close(6 * DT) is None
+    gesture.reset()
+    assert gesture.feature_value is None
+    assert gesture.snapshot().state is GestureState.IDLE
+    assert all_idle([gesture])
 
 
 def _run_hip(rig: Rig, hip_y: NDArray[np.float64]) -> None:

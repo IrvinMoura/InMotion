@@ -6,10 +6,12 @@ from collections.abc import Callable, Sequence
 from typing import Literal, Protocol
 
 from inmotion.gestures.base import (
+    Gesture,
     GestureEvent,
     GestureKind,
     GestureParams,
     GestureSnapshot,
+    GestureState,
 )
 from inmotion.gestures.features import FrameContext
 
@@ -42,25 +44,35 @@ class FeatureGesture:
         params: GestureParams,
         feature: Callable[[FrameContext], float | None],
     ) -> None:
-        raise NotImplementedError
+        self.name = name
+        self.kind = kind
+        self._gesture = Gesture(name, kind, params)
+        self._feature = feature
+        self._value: float | None = None
 
     def update(self, ctx: FrameContext) -> GestureEvent | None:
-        raise NotImplementedError
+        """Calcula a feature do contexto e avança a máquina no instante ``ctx.t``."""
+        self._value = self._feature(ctx)
+        return self._gesture.update(self._value, ctx.t)
 
     def reset(self) -> None:
-        raise NotImplementedError
+        """RF5b da 007: volta a IDLE sem evento (a segurança já soltou tudo)."""
+        self._gesture.reset()
+        self._value = None
 
     def close(self, t: float) -> GestureEvent | None:
-        raise NotImplementedError
+        """Encerra o HOLD ativo com END."""
+        return self._gesture.close(t)
 
     def snapshot(self) -> GestureSnapshot:
-        raise NotImplementedError
+        return self._gesture.snapshot()
 
     @property
     def feature_value(self) -> float | None:
-        raise NotImplementedError
+        """Última feature calculada (para o overlay e o histórico)."""
+        return self._value
 
 
 def all_idle(gestures: Sequence[BodyGesture]) -> bool:
-    """Repouso do corpo (RF3): todos os gestos em IDLE."""
-    raise NotImplementedError
+    """Repouso do corpo (RF3): todos os gestos em IDLE (a base R7 só anda nesse caso)."""
+    return all(g.snapshot().state is GestureState.IDLE for g in gestures)
