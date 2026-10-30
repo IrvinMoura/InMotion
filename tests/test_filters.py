@@ -299,3 +299,57 @@ def test_vectorized_equals_scalar(factory: FilterFactory, seq: list[list[float]]
             [scalars[i].update(float(x.flat[i]), t) for i in range(33 * 3)]
         ).reshape(33, 3)
         np.testing.assert_allclose(out, expected, rtol=0, atol=1e-12)
+
+
+# ---------------------------------------------------------------- T7: ruído e atraso (CA7)
+
+
+def _run_filter(f: TemporalFilter, xs: np.ndarray) -> np.ndarray:
+    """Alimenta ``f`` com ``xs`` a 30 Hz e devolve as saídas escalares."""
+    return np.array([float(f.update(float(x), n * DT)) for n, x in enumerate(xs)])
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("factory", RANGE_PARAMS)
+def test_noise_variance_reduced(factory: FilterFactory) -> None:
+    """CA7: senoide + ruído gaussiano; o filtro reduz a variância do ruído em >= 50%.
+
+    O ruído residual é isolado passando a senoide limpa e a ruidosa por duas instâncias
+    idênticas e subtraindo as saídas; assim o atraso de fase da senoide (que entraria como
+    "erro" se comparássemos com o sinal ideal) não contamina a medida. Para a EMA (R1) o
+    resultado teórico é ``Var(s)/Var(x) = α/(2−α) ≈ 0,095`` com ``α ≈ 0,173``.
+    """
+    rng = np.random.default_rng(42)
+    t = np.arange(900) * DT
+    clean = 0.5 * np.sin(2.0 * math.pi * 0.5 * t)  # 0,5 Hz, amplitude 0,5 (ombros/largura)
+    noise = rng.normal(0.0, 0.05, size=t.shape)
+    residual = _run_filter(factory(), clean + noise) - _run_filter(factory(), clean)
+    warmup = 30  # descarta a partir do transitório inicial
+    reduction = 1.0 - float(np.var(residual[warmup:]) / np.var(noise[warmup:]))
+    assert reduction >= 0.5
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("amplitude", [1.0, 2.0])
+def test_one_euro_lags_less_than_ema_on_fast_motion(amplitude: float) -> None:
+    """CA7: num degrau (movimento rápido) o One Euro atrasa menos que a EMA equivalente.
+
+    "EMA equivalente" = EMA com o ``α`` que o One Euro usa em repouso (``f_c = f_min``,
+    ``Δt = 1/30``): ``α = 1/(1 + 1/(2π·f_min·Δt))`` (R4; F2 com β = 0). As duas suavizam
+    igual em repouso (mesma redução de ruído); só o One Euro eleva o corte com a velocidade
+    (``f_c = f_min + β·|ẋ̂|``). Atraso = nº de quadros após o degrau até a saída atingir
+    90% da amplitude (a EMA leva ``⌈ln 0,1/ln(1−α)⌉`` quadros, R2). Amplitude em larguras
+    de ombro (unidade do esqueleto normalizado).
+    """
+    one_euro_params = OneEuroParams()
+    alpha_rest = smoothing_factor(one_euro_params.min_cutoff, DT)
+    step_at = 30
+    xs = np.where(np.arange(120) < step_at, 0.0, amplitude)
+
+    def lag_frames(f: TemporalFilter) -> int:
+        y = _run_filter(f, xs) / amplitude
+        return int(np.argmax(y >= 0.9)) - step_at
+
+    lag_one_euro = lag_frames(OneEuro(one_euro_params))
+    lag_ema = lag_frames(Ema(EmaParams(alpha=float(alpha_rest))))
+    assert lag_one_euro < lag_ema
