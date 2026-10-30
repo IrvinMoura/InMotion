@@ -8,7 +8,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from inmotion.capture import DEFAULT_CAMERA_INDEX
+from inmotion.config.schema import CameraConfig
 
 _log = logging.getLogger("inmotion")
 
@@ -25,8 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--camera",
         type=int,
-        default=DEFAULT_CAMERA_INDEX,
-        help=f"índice da câmera (padrão: {DEFAULT_CAMERA_INDEX})",
+        default=CameraConfig().index,
+        help=f"índice da câmera (padrão: {CameraConfig().index})",
     )
     parser.add_argument(
         "--camera-backend",
@@ -80,12 +80,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.log_level, args.log_file)
     # Imports tardios: `--help` não carrega OpenCV nem MediaPipe.
     from inmotion.app import AppDeps, OpenCvDisplay, run
-    from inmotion.capture.camera import Camera, CameraConfig
+    from inmotion.capture.camera import Camera
     from inmotion.clock import MonotonicClock
+    from inmotion.config.schema import PoseConfig
     from inmotion.input.hotkeys import WindowsHotkeys
     from inmotion.input.keyboard_mouse import KeyboardMouseBackend
     from inmotion.safety import SafetyConfig
-    from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError, PoseConfig
+    from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError
 
     safety_config = SafetyConfig()
     # O modelo é checado ANTES de abrir a câmera: sem ele, nada de hardware é tocado.

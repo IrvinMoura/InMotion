@@ -7,15 +7,13 @@ frame; o loop principal pega sempre o mais novo, sem fila crescendo (latência m
 from __future__ import annotations
 
 import logging
-import math
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import cv2
 
-from inmotion.capture import DEFAULT_CAMERA_INDEX
+from inmotion.config.schema import CameraConfig
 from inmotion.ports import Clock
 from inmotion.types import FramePacket
 
@@ -25,32 +23,6 @@ _BACKENDS = {"dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF, "any": cv2.CAP_ANY}
 _JOIN_TIMEOUT_S = 1.0
 _READ_FAIL_WAIT_S = 0.01
 _THREAD_NAME = "inmotion-camera"
-
-
-@dataclass(frozen=True)
-class CameraConfig:
-    """Parâmetros da câmera (os padrões migram para ``config/default.yaml`` na spec 004)."""
-
-    index: int = DEFAULT_CAMERA_INDEX
-    backend: Literal["dshow", "msmf", "any"] = "dshow"
-    width: int = 640
-    height: int = 480
-    fps: int = 60
-    fourcc: str = "MJPG"
-    exposure: float | None = None
-
-    def __post_init__(self) -> None:
-        if self.index < 0:
-            raise ValueError(f"index deve ser >= 0: {self.index}")
-        if self.backend not in _BACKENDS:
-            raise ValueError(f"backend inválido: {self.backend!r} (use {sorted(_BACKENDS)})")
-        for name in ("width", "height", "fps"):
-            if getattr(self, name) <= 0:
-                raise ValueError(f"{name} deve ser > 0: {getattr(self, name)}")
-        if len(self.fourcc) != 4:
-            raise ValueError(f"fourcc deve ter 4 caracteres: {self.fourcc!r}")
-        if self.exposure is not None and not math.isfinite(self.exposure):
-            raise ValueError(f"exposure deve ser finito ou None: {self.exposure}")
 
 
 class Camera:

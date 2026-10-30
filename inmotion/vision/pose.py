@@ -7,54 +7,20 @@
 from __future__ import annotations
 
 import logging
-import math
 from collections.abc import Callable
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
+from inmotion.config.schema import PoseConfig
 from inmotion.types import N_LANDMARKS, PoseFrame
 from inmotion.vision.color import bgr_to_rgb
 
 logger = logging.getLogger(__name__)
 
-Variant = Literal["lite", "full", "heavy"]
-_VARIANTS: tuple[str, ...] = ("lite", "full", "heavy")
-_CONFIDENCE_FIELDS: tuple[str, ...] = (
-    "min_detection_confidence",
-    "min_presence_confidence",
-    "min_tracking_confidence",
-)
-
 # Intervalo mínimo (em segundos de ``t``) entre avisos de timestamp corrigido.
 _WARN_INTERVAL_S = 1.0
-
-
-@dataclass(frozen=True)
-class PoseConfig:
-    """Configuração do estimador. Confianças em [0, 1]; variante lite/full/heavy."""
-
-    model_dir: Path = Path("models")
-    variant: Variant = "full"
-    min_detection_confidence: float = 0.5
-    min_presence_confidence: float = 0.5
-    min_tracking_confidence: float = 0.5
-
-    def __post_init__(self) -> None:
-        if self.variant not in _VARIANTS:
-            raise ValueError(f"variant deve ser um de {_VARIANTS}, veio {self.variant!r}")
-        for name in _CONFIDENCE_FIELDS:
-            value = getattr(self, name)
-            if not (math.isfinite(value) and 0.0 <= value <= 1.0):
-                raise ValueError(f"{name} deve estar em [0, 1], veio {value}")
-
-    @property
-    def model_path(self) -> Path:
-        """Caminho do modelo: ``<model_dir>/pose_landmarker_<variant>.task``."""
-        return self.model_dir / f"pose_landmarker_{self.variant}.task"
 
 
 class ModelNotFoundError(FileNotFoundError):

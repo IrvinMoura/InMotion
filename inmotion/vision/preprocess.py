@@ -2,27 +2,12 @@
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
-
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from inmotion.config.schema import PreprocessConfig
 from inmotion.vision.kernels import SOBEL_X, SOBEL_Y, gaussian_kernel_1d
-
-
-@dataclass(frozen=True)
-class PreprocessConfig:
-    """``blur_sigma`` em pixels (``None`` desliga a suavização); ``sobel_debug`` liga a vista."""
-
-    blur_sigma: float | None = 1.0
-    sobel_debug: bool = False
-
-    def __post_init__(self) -> None:
-        sigma = self.blur_sigma
-        if sigma is not None and (not math.isfinite(sigma) or sigma <= 0):
-            raise ValueError(f"blur_sigma deve ser None ou finito e > 0, recebido {sigma}")
 
 
 class Preprocessor:

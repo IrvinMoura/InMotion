@@ -11,7 +11,12 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inmotion.config.schema import AppConfig
+from inmotion.config.schema import (
+    AppConfig,
+    CameraConfig,
+    FilterConfig,
+    PoseConfig,
+)
 from inmotion.config.validate import ConfigError, build, deep_merge
 from inmotion.filters.ema import EmaParams
 
@@ -93,7 +98,6 @@ def test_merge_precedence_property(
             assert merged[key] == value
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 def test_config_is_frozen() -> None:
     cfg = AppConfig()
     with pytest.raises(FrozenInstanceError):
@@ -198,3 +202,56 @@ def test_unsupported_type_raises_type_error() -> None:
 def test_non_dataclass_raises_type_error() -> None:
     with pytest.raises(TypeError, match="dataclass"):
         build(int, {})  # type: ignore[type-var]
+
+
+def test_app_config_composes_module_params_without_duplicating() -> None:
+    from inmotion.exit_zone import ExitZoneConfig
+    from inmotion.gestures.base import GestureParams
+    from inmotion.safety import SafetyConfig
+
+    cfg = build(AppConfig, {"gestures": {"jump": {"theta_on": 0.1, "theta_off": 0.2}}})
+    assert cfg.safety == SafetyConfig()
+    assert cfg.exit_zone == ExitZoneConfig()
+    assert cfg.filters == FilterConfig()
+    assert cfg.gestures == {"jump": GestureParams(theta_on=0.1, theta_off=0.2)}
+    assert cfg.camera.index == 1
+
+
+def test_app_config_error_paths_are_full() -> None:
+    with pytest.raises(ConfigError) as exc:
+        build(AppConfig, {"filters": {"ema": {"alpha": 1.5}}})
+    assert exc.value.path == "filters.ema.alpha"
+    with pytest.raises(ConfigError) as exc:
+        build(AppConfig, {"safety": {"min_track_s": -1}})
+    assert exc.value.path == "safety.min_track_s"
+    with pytest.raises(ConfigError) as exc:
+        build(AppConfig, {"filters": {"ema": {"alpah": 0.4}}})
+    assert "alpha" in str(exc.value)
+    assert exc.value.path == "filters.ema.alpah"
+
+
+@pytest.mark.parametrize(
+    ("direction", "on", "off"),
+    [("below", 0.5, 0.5), ("below", 0.6, 0.5), ("above", 0.5, 0.6), ("ABOVE", 0.4, 0.4)],
+)
+def test_gesture_hysteresis_order_is_validated(direction: str, on: float, off: float) -> None:
+    gesture = {"theta_on": on, "theta_off": off, "direction": direction}
+    with pytest.raises(ConfigError) as exc:
+        build(AppConfig, {"gestures": {"jump": gesture}})
+    assert exc.value.path == "gestures.jump"
+    assert "theta_on" in str(exc.value)
+
+
+def test_gesture_direction_enum_by_name() -> None:
+    from inmotion.gestures.base import Direction
+
+    gesture = {"theta_on": 0.6, "theta_off": 0.5, "direction": "above"}
+    cfg = build(AppConfig, {"gestures": {"jump": gesture}})
+    assert cfg.gestures["jump"].direction is Direction.ABOVE
+
+
+def test_moved_configs_keep_their_validation() -> None:
+    with pytest.raises(ConfigError, match="width"):
+        build(CameraConfig, {"width": 0})
+    with pytest.raises(ConfigError, match="variant"):
+        build(PoseConfig, {"variant": "ultra"})

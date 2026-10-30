@@ -28,14 +28,15 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from inmotion.capture.camera import DEFAULT_CAMERA_INDEX, Camera, CameraConfig
+from inmotion.capture.camera import Camera
 from inmotion.clock import MonotonicClock
+from inmotion.config.schema import CameraConfig, PoseConfig
 from inmotion.input.backend import HotkeySource, KeyName
 from inmotion.input.hotkeys import WindowsHotkeys
 from inmotion.ports import Clock, FrameSource, PoseEstimator
 from inmotion.recorder import Recorder
 from inmotion.recording import SCHEMA_VERSION, LabelTracker, RecordingMeta
-from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError, PoseConfig
+from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError
 
 logger = logging.getLogger("record")
 
@@ -197,7 +198,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighting", choices=LIGHTING_CHOICES, default="outra")
     parser.add_argument("--out", type=Path, required=True, help="caminho do .npz de saída")
     parser.add_argument("--video", type=Path, default=None, help="grava também um .mp4 bruto")
-    parser.add_argument("--camera", type=int, default=DEFAULT_CAMERA_INDEX, help="índice da câmera")
+    parser.add_argument("--camera", type=int, default=CameraConfig().index, help="índice da câmera")
     parser.add_argument("--model-dir", type=Path, default=Path("models"))
     parser.add_argument("--model-variant", choices=VARIANTS, default="full")
     return parser
