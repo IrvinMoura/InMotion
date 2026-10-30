@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from inmotion.exit_zone import ExitZoneState
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
 from inmotion.gestures.legacy import LegacyGesture
@@ -20,6 +21,7 @@ class StepResult:
     fps: float | None
     safety_state: SafetyState
     pose: PoseFrame | None
+    exit_zone: ExitZoneState | None = None
 
 
 class Pipeline:

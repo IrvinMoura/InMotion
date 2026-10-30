@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from inmotion.exit_zone import ExitZone, ExitZoneConfig
 from inmotion.filters.one_euro import OneEuro, OneEuroParams
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
@@ -63,6 +64,7 @@ class AppDeps:
     clock: Clock
     display: Display | None
     pose_filter: PoseFilter | None = field(default_factory=default_pose_filter)
+    exit_zone: ExitZoneConfig | None = field(default_factory=ExitZoneConfig)
 
 
 class OpenCvDisplay:
@@ -102,7 +104,12 @@ def _close_quietly(name: str, obj: FrameSource | PoseEstimator | Display | None)
 
 
 def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = None) -> int:
-    """Loop principal. Devolve 0 na saída normal (F9, janela fechada ou ``max_frames``).
+    """Loop principal. Devolve 0 na saída normal (F9, janela fechada, zona de saída ou
+    ``max_frames``).
+
+    Zona de saída (temporária): com a mão na zona, todo o input é solto e os gestos
+    ficam suspensos (o braço esticado no canto não vira clique); segurar por
+    ``hold_s`` encerra o loop.
 
     Todo o loop roda dentro de ``safety.guard()``: qualquer saída (inclusive exceção do
     estimador ou do display) solta o input. Exceções são propagadas ao chamador.
@@ -116,6 +123,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
     ]
     pipeline = Pipeline(safety, gestures, FpsMeter(window=FPS_WINDOW), deps.pose_filter)
     watchdog = Watchdog(WATCHDOG_TIMEOUT_S)
+    exit_zone = ExitZone(deps.exit_zone) if deps.exit_zone is not None else None
     register_atexit(safety)
 
     stop = threading.Event()
@@ -135,13 +143,21 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
                     break
                 packet = deps.source.read(READ_TIMEOUT_S)
                 pose = deps.estimator.estimate(packet.image, packet.t) if packet else None
-                result = pipeline.step(pose, t)
+                zone = exit_zone.update(pose, t) if exit_zone is not None else None
+                if zone is not None and zone.inside:
+                    tracked.release_all()
+                    result = replace(pipeline.step(None, t), pose=pose, exit_zone=zone)
+                else:
+                    result = replace(pipeline.step(pose, t), exit_zone=zone)
                 if (
                     deps.display is not None
                     and packet is not None
                     and not deps.display.show(packet.image, result)
                 ):
                     _log.info("Janela fechada")
+                    break
+                if zone is not None and zone.triggered:
+                    _log.info("Saída pela zona de saída (mão segurada %.0f s)", zone.config.hold_s)
                     break
     finally:
         stop.set()

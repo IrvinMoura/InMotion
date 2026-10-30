@@ -168,3 +168,55 @@ def test_default_deps_use_one_euro_filter() -> None:
         display=None,
     )
     assert isinstance(deps.pose_filter, PoseFilter)
+
+
+# --- Zona de saída temporária: mão parada no canto superior esquerdo por 4 s ---
+
+
+def punch_in_exit_zone(t: float) -> PoseFrame:
+    """Braço direito em "soco" (ρ ≈ 0,24, pulso acima do quadril) com o pulso na zona."""
+    return make_pose(
+        {
+            PoseLandmark.RIGHT_SHOULDER: (200.0, 220.0),
+            PoseLandmark.RIGHT_ELBOW: (90.0, 140.0),
+            PoseLandmark.RIGHT_WRIST: (64.0, 120.0),  # (0,10; 0,25) normalizado
+            PoseLandmark.RIGHT_HIP: (220.0, 360.0),
+            PoseLandmark.LEFT_WRIST: (400.0, 400.0),
+            PoseLandmark.LEFT_HIP: (300.0, 360.0),
+        },
+        t=t,
+    )
+
+
+def test_hand_held_in_exit_zone_exits_without_clicking() -> None:
+    from inmotion.exit_zone import ExitZoneConfig
+
+    clock = FakeClock()
+    backend = FakeInputBackend()
+    n = 200
+    source = ClockedSource(clock, n)
+    estimator = FakePoseEstimator([punch_in_exit_zone(i * DT) for i in range(n)])
+    deps = make_deps(clock, source, estimator, backend)
+    deps.exit_zone = ExitZoneConfig(hold_s=4.0)
+
+    code = run(deps, SafetyConfig(), max_frames=n)
+
+    assert code == 0
+    assert 4.0 / DT <= len(estimator.calls) <= 4.0 / DT + 3  # saiu logo após 4 s
+    assert ("press", "mouse_left") not in backend.events  # gestos suspensos na zona
+    assert backend.pressed == set()
+
+
+def test_same_pose_clicks_when_exit_zone_disabled() -> None:
+    """Controle: sem a zona, a mesma pose é um soco (o teste acima não é vazio)."""
+    clock = FakeClock()
+    backend = FakeInputBackend()
+    source = ClockedSource(clock, 5)
+    estimator = FakePoseEstimator([punch_in_exit_zone(i * DT) for i in range(5)])
+    deps = make_deps(clock, source, estimator, backend)
+    deps.exit_zone = None
+
+    run(deps, SafetyConfig(), max_frames=5)
+
+    assert ("press", "mouse_left") in backend.events
+    assert backend.pressed == set()

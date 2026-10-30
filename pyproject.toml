@@ -105,6 +105,7 @@ module = [
     "inmotion.recording",
     "inmotion.replay",
     "inmotion.metrics",
+    "inmotion.exit_zone",
     "inmotion.fps",
     "inmotion.filters.*",
     "inmotion.gestures.*",

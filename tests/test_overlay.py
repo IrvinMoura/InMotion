@@ -56,3 +56,17 @@ def test_render_does_not_modify_input_or_result() -> None:
     assert not img.any()
     assert np.array_equal(res.pose.landmarks, landmarks_before)
     assert res.fps == 29.7
+
+
+def test_render_draws_exit_zone_with_progress() -> None:
+    from dataclasses import replace
+
+    from inmotion.exit_zone import ExitZoneConfig, ExitZoneState
+
+    cfg = ExitZoneConfig(x0=0.0, y0=0.5, x1=0.5, y1=1.0)
+    base = StepResult(t=0.0, fps=None, safety_state=SafetyState.ACTIVE, pose=None)
+    idle = render(blank(), replace(base, exit_zone=ExitZoneState(cfg, False, 0.0, False)))
+    half = render(blank(), replace(base, exit_zone=ExitZoneState(cfg, True, 0.5, False)))
+    zone = (slice(60, 120), slice(0, 80))  # [y0·H, y1·H) × [x0·W, x1·W)
+    assert idle[zone].any()  # contorno do bloco
+    assert half[zone].sum() > idle[zone].sum()  # barra de progresso preenchida
