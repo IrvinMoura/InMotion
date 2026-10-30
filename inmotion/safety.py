@@ -27,12 +27,16 @@ class SafetyConfig:
         exit_key: tecla global que pede a saída.
         always_release: soltas em todo ``release_all()``, mesmo fora de P. Tem de ser o
             mesmo valor do ``TrackedInput``; o ``SafetyManager`` confere na construção.
+        min_torso_visibility: visibilidade mínima de ombros e quadris para a pose contar
+            como rastreada (``ℓₙ = 1`` na R5). Abaixo disso é pose "fantasma" ou parcial
+            e conta como perda de tracking.
     """
 
     lost_timeout_s: float = 0.2
     pause_key: KeyName = "f8"
     exit_key: KeyName = "f9"
     always_release: frozenset[KeyName] = MOUSE_BUTTONS
+    min_torso_visibility: float = 0.5
 
     def __post_init__(self) -> None:
         if not (math.isfinite(self.lost_timeout_s) and self.lost_timeout_s > 0):
@@ -40,6 +44,10 @@ class SafetyConfig:
         for field in ("pause_key", "exit_key"):
             if not getattr(self, field):
                 raise ValueError(f"{field} não pode ser vazio")
+        if not (math.isfinite(self.min_torso_visibility) and 0 <= self.min_torso_visibility <= 1):
+            raise ValueError(
+                f"min_torso_visibility deve estar em [0, 1]: {self.min_torso_visibility}"
+            )
         if self.pause_key == self.exit_key:
             raise ValueError(f"pause_key e exit_key devem ser diferentes: {self.pause_key!r}")
 
@@ -153,6 +161,10 @@ class SafetyManager:
             if self._paused:
                 return SafetyState.PAUSED
             return SafetyState.LOST if self._lost else SafetyState.ACTIVE
+
+    @property
+    def config(self) -> SafetyConfig:
+        return self._config
 
     @property
     def input(self) -> TrackedInput:

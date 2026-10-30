@@ -11,6 +11,16 @@ from inmotion.fps import FpsMeter
 from inmotion.gestures.legacy import LegacyGesture
 from inmotion.safety import SafetyManager, SafetyState
 from inmotion.types import PoseFrame
+from inmotion.vision.geometry import is_visible
+from inmotion.vision.landmarks import PoseLandmark
+
+# Ombros e quadris: sem eles visíveis a pose é fantasma/parcial e não conta como tracking.
+TORSO: tuple[int, ...] = (
+    PoseLandmark.LEFT_SHOULDER,
+    PoseLandmark.RIGHT_SHOULDER,
+    PoseLandmark.LEFT_HIP,
+    PoseLandmark.RIGHT_HIP,
+)
 
 
 @dataclass(frozen=True)
@@ -47,10 +57,18 @@ class Pipeline:
     def step(self, pose: PoseFrame | None, t: float) -> StepResult:
         """on_frame → (se ACTIVE) gestos → FPS. Ao voltar para ACTIVE, reset() nos gestos.
 
-        ``tracking_ok`` é ``pose is not None``. Os gestos só rodam com pose e em ACTIVE;
+        ``tracking_ok`` exige pose com o tronco visível (``min_torso_visibility`` em
+        ombros e quadris): ao sair do quadro o MediaPipe pode devolver uma pose
+        "fantasma" de baixa visibilidade, que não pode segurar teclas. Os gestos só
+        rodam com pose rastreada e em ACTIVE; o ``StepResult`` ainda leva a pose crua
+        não rastreada, para o overlay.
         na volta de LOST/PAUSED para ACTIVE o estado deles é zerado antes do primeiro
         ``update``, pois o ``release_all()`` já soltou as teclas que eles achavam apertadas.
         """
+        raw = pose
+        threshold = self._safety.config.min_torso_visibility
+        if pose is not None and not is_visible(pose, TORSO, threshold):
+            pose = None
         self._safety.on_frame(t, pose is not None)
         state = self._safety.state
         active = state is SafetyState.ACTIVE
@@ -67,4 +85,4 @@ class Pipeline:
             for gesture in self._gestures:
                 gesture.update(pose, self._safety.input)
         fps = self._fps.update(t)
-        return StepResult(t=t, fps=fps, safety_state=state, pose=pose)
+        return StepResult(t=t, fps=fps, safety_state=state, pose=raw if pose is None else pose)

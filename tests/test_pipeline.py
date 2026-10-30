@@ -193,7 +193,6 @@ SIZE = (640, 480)
 HIP_BASE_Y = 300.0
 HIP_UP_Y = 250.0  # 50 px acima da base: passa do rise·H = 33,3 px
 GHOST_VISIBILITY = 0.05
-BUG_XFAIL = pytest.mark.xfail(strict=True, reason="bug do checklist 003 T8, correção pendente")
 
 
 def _hips(y: float, t: float, visibility: float = 1.0) -> PoseFrame:
@@ -217,7 +216,6 @@ def _run(pipeline: Pipeline, poses: list[PoseFrame]) -> None:
         pipeline.step(pose, pose.t)
 
 
-@BUG_XFAIL
 def test_ghost_pose_after_leaving_frame_does_not_hold_jump() -> None:
     pipeline, fake = _jump_pipeline()
     poses = [_hips(HIP_BASE_Y, i * DT) for i in range(10)]
@@ -226,7 +224,6 @@ def test_ghost_pose_after_leaving_frame_does_not_hold_jump() -> None:
     assert "space" not in fake.pressed
 
 
-@BUG_XFAIL
 def test_returning_at_new_distance_after_ghost_does_not_hold_jump() -> None:
     """Volta ao quadro com os quadris em outra altura (mais perto/longe): sem pulo preso."""
     pipeline, fake = _jump_pipeline()
@@ -243,3 +240,27 @@ def test_real_jump_still_presses_and_releases() -> None:
     ys = [HIP_BASE_Y] * 3 + [HIP_UP_Y] * 3 + [HIP_BASE_Y] * 3
     _run(pipeline, [_hips(y, i * DT) for i, y in enumerate(ys)])
     assert fake.events == [("press", "space"), ("release", "space")]
+
+
+def test_hips_out_of_frame_counts_as_lost() -> None:
+    """Opção A (custo aceito): sem quadris visíveis (muito perto) -> LOST e nada apertado."""
+    from inmotion.vision.landmarks import PoseLandmark
+
+    spy = SpyGesture()
+    pipeline, _, fake = make_pipeline(spy)
+    hidden = {PoseLandmark.LEFT_HIP: 0.1, PoseLandmark.RIGHT_HIP: 0.1}
+    res = None
+    for i in range(10):
+        res = pipeline.step(make_pose({}, t=i * DT, visibility=hidden), i * DT)
+    assert res is not None
+    assert spy.updates == []  # gestos nunca rodaram com o tronco incompleto
+    assert res.safety_state is SafetyState.LOST
+    assert res.pose is not None  # o overlay ainda mostra os pontos
+    assert fake.pressed == set()
+
+
+def test_min_torso_visibility_validation() -> None:
+    assert SafetyConfig().min_torso_visibility == 0.5
+    for bad in (-0.1, 1.5, float("nan")):
+        with pytest.raises(ValueError, match="min_torso_visibility"):
+            SafetyConfig(min_torso_visibility=bad)
