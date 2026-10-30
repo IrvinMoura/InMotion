@@ -345,3 +345,10 @@ def test_profile_rejects_bad_kind_and_empty_input() -> None:
     with pytest.raises(ConfigError) as exc:
         _profile({"jump": {"input": "", "kind": "hold"}})
     assert exc.value.path == "bindings.jump.input"
+
+
+def test_safety_watchdog_timeout_is_validated() -> None:
+    assert build(AppConfig, {}).safety.watchdog_timeout_s == 0.5
+    with pytest.raises(ConfigError) as exc:
+        build(AppConfig, {"safety": {"watchdog_timeout_s": 0}})
+    assert exc.value.path == "safety.watchdog_timeout_s"

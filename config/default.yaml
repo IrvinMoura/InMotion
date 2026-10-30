@@ -50,6 +50,8 @@ safety:
   # Pose contínua por este tempo até valer. Pose "fantasma" de objetos durou no máximo
   # 0,73 s na gravação recordings/fantasma.npz (29/10/2026); 1,0 s dá folga de 1,37x.
   min_track_s: 1.0
+  # Sem batida do loop por tanto tempo, o watchdog solta todo o input (loop travado).
+  watchdog_timeout_s: 0.5
 
 # Zona de saída temporária: mão no retângulo (coordenadas normalizadas da imagem, sem
 # espelhamento) por hold_s segundos encerra o app. Provisória até a spec 009.

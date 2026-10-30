@@ -222,3 +222,46 @@ def test_same_pose_clicks_when_exit_zone_disabled() -> None:
 
     assert ("press", "mouse_left") in backend.events
     assert backend.pressed == set()
+
+
+def test_watchdog_timeout_comes_from_safety_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CA9: o limiar do watchdog vem do ``SafetyConfig`` (config), não de uma constante."""
+    import inmotion.app as app_module
+
+    timeouts: list[float] = []
+
+    class SpyWatchdog(app_module.Watchdog):
+        def __init__(self, timeout_s: float = 0.5) -> None:
+            timeouts.append(timeout_s)
+            super().__init__(timeout_s)
+
+    monkeypatch.setattr(app_module, "Watchdog", SpyWatchdog)
+    clock = FakeClock()
+    deps = make_deps(
+        clock, ClockedSource(clock, 1), FakePoseEstimator(JUMP[:1]), FakeInputBackend()
+    )
+    run(deps, SafetyConfig(min_track_s=0.0, watchdog_timeout_s=1.25), max_frames=1)
+    assert timeouts == [1.25]
+
+
+def test_profile_bindings_choose_the_keys() -> None:
+    clock = FakeClock()
+    backend = FakeInputBackend()
+    deps = make_deps(clock, ClockedSource(clock, 4), FakePoseEstimator(JUMP), backend)
+    deps.bindings = {"jump": "w"}  # sem attack/use: esses gestos não existem
+
+    run(deps, NO_PERSISTENCE, max_frames=4)
+
+    assert [e for e in backend.events if e[1] in ("w", "space")] == [
+        ("press", "w"),
+        ("release", "w"),
+    ]
+
+
+def test_pose_filter_from_config_selects_kind() -> None:
+    from inmotion.app import pose_filter_from_config
+    from inmotion.config.schema import FilterConfig
+
+    assert pose_filter_from_config(FilterConfig(kind="none")) is None
+    assert pose_filter_from_config(FilterConfig(kind="ema")) is not None
+    assert pose_filter_from_config(FilterConfig(kind="one_euro")) is not None

@@ -19,7 +19,7 @@ _log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SafetyConfig:
-    """Parâmetros de segurança (os padrões migram para ``config/default.yaml`` na spec 004).
+    """Parâmetros de segurança (os valores efetivos vêm de ``config/default.yaml``, spec 004).
 
     Attributes:
         lost_timeout_s: tempo sem pose, em segundos, até soltar tudo (``T`` da R5 temporal).
@@ -33,6 +33,8 @@ class SafetyConfig:
         min_track_s: tempo de pose contínua até ela valer (debounce R5 no tempo). A pose
             "fantasma" de objetos pisca por no máximo 0,73 s (recordings/fantasma.npz,
             29/10/2026); 1,0 s dá folga de 1,37×. ``0`` desliga.
+        watchdog_timeout_s: sem batida do loop por mais que isso, o watchdog dá o loop
+            como travado e solta todo o input.
     """
 
     lost_timeout_s: float = 0.2
@@ -41,6 +43,7 @@ class SafetyConfig:
     always_release: frozenset[KeyName] = MOUSE_BUTTONS
     min_torso_visibility: float = 0.5
     min_track_s: float = 1.0
+    watchdog_timeout_s: float = 0.5
 
     def __post_init__(self) -> None:
         if not (math.isfinite(self.lost_timeout_s) and self.lost_timeout_s > 0):
@@ -54,6 +57,8 @@ class SafetyConfig:
             )
         if not (math.isfinite(self.min_track_s) and self.min_track_s >= 0):
             raise ValueError(f"min_track_s deve ser finito e >= 0: {self.min_track_s}")
+        if not (math.isfinite(self.watchdog_timeout_s) and self.watchdog_timeout_s > 0):
+            raise ValueError(f"watchdog_timeout_s deve ser finito e > 0: {self.watchdog_timeout_s}")
         if self.pause_key == self.exit_key:
             raise ValueError(f"pause_key e exit_key devem ser diferentes: {self.pause_key!r}")
 

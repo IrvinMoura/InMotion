@@ -38,7 +38,6 @@ from inmotion.watchdog import Watchdog
 
 _log = logging.getLogger(__name__)
 
-WATCHDOG_TIMEOUT_S = 0.5  # sem beat por mais que isso, o loop é dado como travado
 WATCHDOG_POLL_S = 0.05  # período da thread que consulta o watchdog
 READ_TIMEOUT_S = 0.1  # espera máxima por frame novo
 FPS_WINDOW = 30
@@ -102,11 +101,13 @@ class OpenCvDisplay:
         cv2.destroyAllWindows()
 
 
-def _watch(watchdog: Watchdog, safety: SafetyManager, clock: Clock, stop: threading.Event) -> None:
+def _watch(
+    watchdog: Watchdog, safety: SafetyManager, clock: Clock, stop: threading.Event, timeout_s: float
+) -> None:
     """Thread do watchdog: se o loop parar de bater, solta todo o input."""
     while not stop.wait(WATCHDOG_POLL_S):
         if watchdog.expired(clock.now()):
-            _log.error("Loop travado por mais de %.2f s: soltando todo o input", WATCHDOG_TIMEOUT_S)
+            _log.error("Loop travado por mais de %.2f s: soltando todo o input", timeout_s)
             try:
                 safety.on_stall()
             except Exception:
@@ -149,13 +150,16 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
     safety = SafetyManager(tracked, safety_config)
     gestures = legacy_gestures(deps.bindings)
     pipeline = Pipeline(safety, gestures, FpsMeter(window=FPS_WINDOW), deps.pose_filter)
-    watchdog = Watchdog(WATCHDOG_TIMEOUT_S)
+    watchdog = Watchdog(safety_config.watchdog_timeout_s)
     exit_zone = ExitZone(deps.exit_zone) if deps.exit_zone is not None else None
     register_atexit(safety)
 
     stop = threading.Event()
     watcher = threading.Thread(
-        target=_watch, args=(watchdog, safety, deps.clock, stop), name="watchdog", daemon=True
+        target=_watch,
+        args=(watchdog, safety, deps.clock, stop, safety_config.watchdog_timeout_s),
+        name="watchdog",
+        daemon=True,
     )
     frames = 0
     try:

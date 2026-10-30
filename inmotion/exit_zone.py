@@ -3,7 +3,7 @@
 Existe porque, com os gestos clicando o mouse, fica difícil chegar ao terminal. Um pulso
 visível dentro do retângulo (coordenadas normalizadas da imagem, sem espelhamento) por
 ``hold_s`` segundos seguidos dispara a saída; sair do retângulo zera a contagem.
-Provisória até a spec 004/009 (config em YAML e overlay completo).
+Provisória até a spec 009 (overlay completo); os valores vêm de ``config/default.yaml``.
 """
 
 from __future__ import annotations
