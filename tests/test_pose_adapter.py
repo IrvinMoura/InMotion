@@ -175,6 +175,10 @@ def test_pose_connections_match_mediapipe_topology() -> None:
 _MODEL_DIR = Path(__file__).resolve().parents[1] / "models"
 _HW_WAIT_S = 15.0  # tempo para a pessoa se posicionar
 _HW_READ_TIMEOUT_S = 1.0
+_HW_EMPTY_HOLD_S = 2.0  # cena vazia: sem pessoa por este tempo seguido
+_HW_MIN_FRAMES = 10  # mínimo de frames para checar que o vídeo é ao vivo
+# Índice da webcam real; câmeras virtuais (Snap Camera, NVIDIA Broadcast) podem ocupar o 0.
+_HW_CAMERA_ENV = "INMOTION_CAMERA"
 _SHOULDERS = (11, 12)
 _MIN_SHOULDER_VISIBILITY = 0.5
 
@@ -182,19 +186,30 @@ _MIN_SHOULDER_VISIBILITY = 0.5
 def _wait_for_pose(
     capsys: pytest.CaptureFixture[str], prompt: str, want_person: bool
 ) -> PoseFrame | None:
-    """Lê a webcam até a condição valer (ou o prazo acabar); devolve a última pose lida."""
+    """Lê a webcam até a condição valer (ou o prazo acabar); devolve a última pose lida.
+
+    Com ``want_person=False`` a cena precisa ficar vazia por ``_HW_EMPTY_HOLD_S``. Falha
+    se todos os frames forem idênticos: imagem parada de câmera virtual não vale.
+    """
+    import os
+
     from inmotion.capture.camera import Camera, CameraConfig
     from inmotion.clock import MonotonicClock
 
     config = PoseConfig(model_dir=_MODEL_DIR)
     if not config.model_path.is_file():
         pytest.skip(f"modelo ausente: {config.model_path}")
+    index = int(os.environ.get(_HW_CAMERA_ENV, "0"))
     clock = MonotonicClock()
     with capsys.disabled():
-        print(f"\n>>> {prompt} (até {_HW_WAIT_S:.0f} s)")
-    camera = Camera(CameraConfig(), clock)
+        print(f"\n>>> {prompt} (câmera {index}, até {_HW_WAIT_S:.0f} s)")
+    camera = Camera(CameraConfig(index=index), clock)
     camera.start()
     pose: PoseFrame | None = None
+    first: np.ndarray[Any, Any] | None = None
+    live = False
+    frames = 0
+    empty_since: float | None = None
     try:
         with MediaPipePoseEstimator(config) as estimator:
             deadline = clock.now() + _HW_WAIT_S
@@ -202,11 +217,25 @@ def _wait_for_pose(
                 packet = camera.read(timeout_s=_HW_READ_TIMEOUT_S)
                 if packet is None:
                     continue
+                frames += 1
+                if first is None:
+                    first = packet.image.copy()
+                elif not live:
+                    live = not np.array_equal(first, packet.image)
                 pose = estimator.estimate(packet.image, packet.t)
-                if (pose is not None) == want_person:
+                if want_person:
+                    done = pose is not None
+                else:
+                    empty_since = None if pose is not None else (empty_since or packet.t)
+                    done = empty_since is not None and packet.t - empty_since >= _HW_EMPTY_HOLD_S
+                if done and frames >= _HW_MIN_FRAMES:
                     break
     finally:
         camera.close()
+    assert live, (
+        f"câmera {index} entregou só frames idênticos (câmera virtual?); "
+        f"defina {_HW_CAMERA_ENV} com o índice da webcam real"
+    )
     return pose
 
 
