@@ -112,6 +112,8 @@ module = [
     "inmotion.safety",
     "inmotion.calibration",
     "inmotion.input.backend",
+    "inmotion.config.schema",
+    "inmotion.config.validate",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

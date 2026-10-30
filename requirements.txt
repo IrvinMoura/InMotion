@@ -4,6 +4,7 @@
 # --- Diretas ---
 mediapipe==0.10.31          # ATENÇÃO: sem mp.solutions (ver docs/adr/0002)
 numpy==2.2.6
+PyYAML==6.0.3               # configuração (spec 004; só safe_load)
 opencv-python==4.12.0.88
 PyDirectInput==1.0.4 ; sys_platform == "win32"
 
