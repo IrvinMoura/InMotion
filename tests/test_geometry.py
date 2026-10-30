@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 import warnings
 from collections.abc import Callable
 
@@ -381,3 +382,35 @@ def test_arm_extension_side_and_degenerate() -> None:
     assert ext.elbow_angle == pytest.approx(math.pi)
     same = {L_SH: (300.0, 150.0), L_EL: (300.0, 150.0), L_WR: (400.0, 250.0)}
     assert arm_extension(make_pose(same), Side.LEFT, CFG) is None
+
+
+# ---------------------------------------------------------------- T8: benchmark (CA8)
+
+
+@pytest.mark.slow
+def test_geometry_frame_under_1ms() -> None:
+    """CA8: a geometria de um frame (A6 + inclinação + extensão dos dois braços) < 1 ms.
+
+    Mede a média de 1000 iterações com ``time.perf_counter`` após 100 de aquecimento.
+    """
+    pts = _torso((400, 150), (240, 170), (380, 330), (260, 350))
+    pts.update({L_EL: (420.0, 250.0), L_WR: (470.0, 320.0)})
+    pts.update({int(PoseLandmark.RIGHT_ELBOW): (220.0, 260.0)})
+    pts.update({int(PoseLandmark.RIGHT_WRIST): (200.0, 340.0)})
+    pose = make_pose(pts, world=_EXTENDED)
+
+    def frame() -> None:
+        sk = normalize_skeleton(pose, CFG)
+        assert sk is not None
+        trunk_lean(sk)
+        arm_extension(pose, Side.LEFT, CFG)
+        arm_extension(pose, Side.RIGHT, CFG)
+
+    for _ in range(100):
+        frame()
+    n = 1000
+    start = time.perf_counter()
+    for _ in range(n):
+        frame()
+    mean_ms = (time.perf_counter() - start) / n * 1000.0
+    assert mean_ms < 1.0, f"geometria por frame: {mean_ms:.3f} ms"
