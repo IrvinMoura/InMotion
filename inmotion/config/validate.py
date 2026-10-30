@@ -21,6 +21,7 @@ T = TypeVar("T")
 
 _UNION_ORIGINS = (typing.Union, types.UnionType)
 _LEADING_WORD = re.compile(r"\s*(\w+)")
+_SEGMENT = re.compile(r"[A-Za-z_]\w*")
 
 
 class ConfigError(ValueError):
@@ -158,9 +159,43 @@ def build(cls: type[T], data: Mapping[str, object], path: str = "") -> T:
         raise ConfigError(_join(path, failed) if failed else path, str(exc)) from exc
 
 
+def _copy(value: object) -> object:
+    """Cópia profunda dos mapas (as folhas, inclusive listas, são compartilhadas)."""
+    if isinstance(value, Mapping):
+        return {k: _copy(v) for k, v in value.items()}
+    return value
+
+
 def deep_merge(*layers: Mapping[str, object]) -> dict[str, object]:
-    raise NotImplementedError
+    """Mesclagem recursiva de dicts; a camada mais à direita vence; listas são substituídas.
+
+    Propriedades (testadas): associativa, ``{}`` é a identidade e as entradas não mudam.
+    Mapa sobre mapa mescla chave a chave; qualquer outro caso é substituição.
+    """
+    merged: dict[str, object] = {}
+    for layer in layers:
+        for key, value in layer.items():
+            current = merged.get(key)
+            if isinstance(current, dict) and isinstance(value, Mapping):
+                merged[key] = deep_merge(current, value)
+            else:
+                merged[key] = _copy(value)
+    return merged
 
 
 def parse_override(text: str) -> tuple[tuple[str, ...], str]:
-    raise NotImplementedError
+    """``'filters.ema.alpha=0.4'`` → ``(('filters', 'ema', 'alpha'), '0.4')``.
+
+    Só o primeiro ``=`` separa; o valor volta como texto (o loader o lê como YAML).
+
+    Raises:
+        ConfigError: sem ``=``, caminho vazio ou com segmento inválido.
+    """
+    path_text, sep, value = text.partition("=")
+    parts = tuple(path_text.split("."))
+    if not sep or not all(_SEGMENT.fullmatch(p) for p in parts):
+        raise ConfigError(
+            "--set",
+            f"esperado caminho.do.campo=valor (ex.: filters.ema.alpha=0.4), recebido {text!r}",
+        )
+    return parts, value

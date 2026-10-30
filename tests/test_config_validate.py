@@ -17,7 +17,7 @@ from inmotion.config.schema import (
     FilterConfig,
     PoseConfig,
 )
-from inmotion.config.validate import ConfigError, build, deep_merge
+from inmotion.config.validate import ConfigError, build, deep_merge, parse_override
 from inmotion.filters.ema import EmaParams
 
 
@@ -81,7 +81,6 @@ _layers = st.recursive(
 )
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError)
 @given(a=_layers, b=_layers, c=_layers)
 def test_merge_precedence_property(
     a: dict[str, object], b: dict[str, object], c: dict[str, object]
@@ -255,3 +254,28 @@ def test_moved_configs_keep_their_validation() -> None:
         build(CameraConfig, {"width": 0})
     with pytest.raises(ConfigError, match="variant"):
         build(PoseConfig, {"variant": "ultra"})
+
+
+def test_merge_recursive_lists_replaced_and_inputs_untouched() -> None:
+    a = {"x": {"y": 1, "z": [1, 2]}, "k": 1}
+    b = {"x": {"z": [9]}, "k": {"n": 2}}
+    merged = deep_merge(a, b)
+    assert merged == {"x": {"y": 1, "z": [9]}, "k": {"n": 2}}
+    assert a == {"x": {"y": 1, "z": [1, 2]}, "k": 1}  # entradas intactas
+    merged["x"]["y"] = 5  # type: ignore[index]
+    assert a["x"]["y"] == 1  # sem aliasing
+    assert deep_merge() == {}
+
+
+def test_parse_override() -> None:
+    assert parse_override("filters.ema.alpha=0.4") == (("filters", "ema", "alpha"), "0.4")
+    assert parse_override("camera.index=2") == (("camera", "index"), "2")
+    assert parse_override("a=b=c") == (("a",), "b=c")  # só o primeiro '=' separa
+    assert parse_override("pose.model_dir=") == (("pose", "model_dir"), "")
+
+
+@pytest.mark.parametrize("text", ["filters.ema.alpha", "=3", "a..b=1", ".a=1", "a b=1"])
+def test_parse_override_errors(text: str) -> None:
+    with pytest.raises(ConfigError) as exc:
+        parse_override(text)
+    assert "--set" in str(exc.value)
