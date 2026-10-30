@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -17,8 +18,9 @@ from inmotion.gestures.base import (
 )
 from inmotion.gestures.body import BodyGesture, all_idle
 from inmotion.gestures.crouch import crouch_gesture
-from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context
+from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context, lean_forward
 from inmotion.gestures.jump import jump_gesture
+from inmotion.gestures.lean import lean_gesture
 from inmotion.gestures.punch import punch_gesture, punch_pair
 from inmotion.types import PoseFrame
 from inmotion.vision.geometry import GeometryConfig
@@ -31,6 +33,7 @@ DT = 1.0 / 30.0
 PUNCH = GestureParams(0.70, 0.55, Direction.ABOVE, debounce_frames=3)
 JUMP = GestureParams(0.25, 0.15, Direction.ABOVE, debounce_frames=2)
 CROUCH = GestureParams(0.35, 0.25, Direction.ABOVE, debounce_frames=4)
+LEAN = GestureParams(0.30, 0.20, Direction.ABOVE, debounce_frames=4)
 
 
 class Rig:
@@ -233,3 +236,87 @@ def test_long_crouch_does_not_move_baseline() -> None:
     assert abs(rig.baseline.value - 300.0) < 2.0
     assert rig.kinds("crouch") == [EventKind.START]
     assert rig.kinds("jump") == []
+
+
+def _lean_run(rig: Rig, lean_by_frame: dict[range, float], n: int) -> None:
+    for i in range(n):
+        lean = next((v for r, v in lean_by_frame.items() if i in r), 0.0)
+        rig.step(make_body(t=i * DT, lean=lean))
+
+
+def test_forward_lean_holds_walk() -> None:
+    """RF5: tronco inclinado para frente (0,5 rad > 0,30) segura `walk` até endireitar."""
+    rig = Rig([lean_gesture(LEAN, GEOMETRY)])
+    _lean_run(rig, {range(30, 90): 0.5}, 120)
+    assert rig.kinds("walk") == [EventKind.START, EventKind.END]
+    start, end = rig.events
+    assert 30 * DT < start.t <= 34 * DT  # N = 4 frames
+    assert end.t == pytest.approx(90 * DT)
+
+
+def test_upright_does_not_walk() -> None:
+    """Em pé (0 rad), inclinado para trás ou com pouca inclinação: nada."""
+    rig = Rig([lean_gesture(LEAN, GEOMETRY)])
+    _lean_run(rig, {range(30, 60): -0.6, range(60, 90): 0.2}, 120)
+    assert rig.events == []
+
+
+def test_lean_hysteresis_holds_between_thresholds() -> None:
+    """Entre θ_off (0,20) e θ_on (0,30) o `walk` ativo continua."""
+    rig = Rig([lean_gesture(LEAN, GEOMETRY)])
+    _lean_run(rig, {range(10, 40): 0.5, range(40, 70): 0.25}, 100)
+    assert rig.kinds("walk") == [EventKind.START, EventKind.END]
+    assert rig.events[-1].t == pytest.approx(70 * DT)
+
+
+def test_lean_without_world_never_walks() -> None:
+    rig = Rig([lean_gesture(LEAN, GEOMETRY)])
+    for i in range(30):
+        rig.step(make_body(t=i * DT, lean=0.5, with_world=False))
+    assert rig.events == []
+
+
+@pytest.mark.hardware
+def test_lean_sign_on_hardware(capsys: pytest.CaptureFixture[str]) -> None:
+    """Confirma o sinal de `lean_forward` com o MediaPipe real: inclinar para a frente > 0.
+
+    Fica 3 s em pé (referência) e 4 s inclinando o tronco para a frente; exige que o
+    máximo inclinado supere a média em pé em pelo menos 0,10 rad e seja positivo.
+    """
+    import os
+
+    from inmotion.capture.camera import DEFAULT_CAMERA_INDEX, Camera, CameraConfig
+    from inmotion.clock import MonotonicClock
+    from inmotion.vision.pose import MediaPipePoseEstimator, PoseConfig
+
+    config = PoseConfig(model_dir=Path(__file__).resolve().parents[1] / "models")
+    if not config.model_path.is_file():
+        pytest.skip(f"modelo ausente: {config.model_path}")
+    index = int(os.environ.get("INMOTION_CAMERA", str(DEFAULT_CAMERA_INDEX)))
+    clock = MonotonicClock()
+    upright: list[float] = []
+    leaning: list[float] = []
+    camera = Camera(CameraConfig(index=index), clock)
+    camera.start()
+    try:
+        with MediaPipePoseEstimator(config) as estimator:
+            t0 = clock.now()
+            with capsys.disabled():
+                print("\n>>> Fique em pé por 3 s; depois incline o tronco para frente por 4 s")
+            while (elapsed := clock.now() - t0) < 7.0:
+                packet = camera.read(timeout_s=0.5)
+                if packet is None:
+                    continue
+                pose = estimator.estimate(packet.image, packet.t)
+                value = None if pose is None else lean_forward(pose, GEOMETRY)
+                if value is not None:
+                    (upright if elapsed < 3.0 else leaning).append(value)
+    finally:
+        camera.close()
+    assert upright
+    assert leaning
+    base = sum(upright) / len(upright)
+    with capsys.disabled():
+        print(f"lean em pé (média) = {base:.3f} rad; inclinado (máx) = {max(leaning):.3f} rad")
+    assert max(leaning) > 0.0
+    assert max(leaning) - base > 0.10

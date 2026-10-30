@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from inmotion.gestures.base import GestureKind, GestureParams
+from inmotion.gestures.base import Direction, GestureKind, GestureParams
 from inmotion.gestures.body import FeatureGesture
 from inmotion.gestures.features import forward_reach
 from inmotion.vision.geometry import GeometryConfig
 from inmotion.vision.landmarks import Side
+
+DEFAULT_PUNCH_PARAMS = GestureParams(0.70, 0.55, Direction.ABOVE, debounce_frames=3)
 
 
 def punch_gesture(
