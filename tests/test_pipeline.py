@@ -11,7 +11,7 @@ from inmotion.config.schema import Binding, GameProfile
 from inmotion.filters import FloatArray
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
-from inmotion.gestures.base import Direction, GestureKind, GestureParams
+from inmotion.gestures.base import Direction, GestureEvent, GestureKind, GestureParams, GestureState
 from inmotion.gestures.body import BodyGesture, FeatureGesture
 from inmotion.gestures.factory import BODY_GESTURE_NAMES, build_body_gestures
 from inmotion.gestures.features import FrameContext
@@ -538,3 +538,114 @@ def test_both_baselines_freeze_together() -> None:
     assert len(set(shoulder_base[frozen:])) == 1
     assert hip_base[frozen - 1] != hip_base[n_rest - 6]  # e antes disso ainda andava
     assert shoulder_base[frozen - 1] != shoulder_base[n_rest - 6]
+
+
+# --- Spec 017 RF4 / ADR 0011: com o agachar em curso, a pose vale só com os ombros -----------
+
+CROUCH_PROFILE = GameProfile("teste", {"crouch": Binding("shift", GestureKind.HOLD)})
+SQUAT_DY_PX = 120.0  # c = 1,2 larguras de ombro (> theta_on 1,0 do agachar)
+
+
+def _stand(i: int) -> PoseFrame:
+    return make_body(t=i * DT)
+
+
+def _squat(i: int, *, hips: bool) -> PoseFrame:
+    return make_body(t=i * DT, shoulder_dy_px=SQUAT_DY_PX, hips_visible=hips)
+
+
+def _crouch_pipeline(
+    config: SafetyConfig | None = None,
+) -> tuple[Pipeline, SafetyManager, FakeInputBackend]:
+    return build(build_body_gestures({"crouch"}), CROUCH_PROFILE, config)
+
+
+def _shift_events(fake: FakeInputBackend) -> list[tuple[str, str]]:
+    return [e for e in fake.events if e[1] == "shift"]
+
+
+def test_crouch_keeps_tracking_without_hips() -> None:
+    """Agachado (ACTIVE), o quadril sai do quadro por muito mais que ``lost_timeout_s``:
+    a pose vale pelos ombros, o ``shift`` segue apertado e nada é solto."""
+    pipeline, _, fake = _crouch_pipeline()
+    poses = [_stand(i) for i in range(20)]
+    poses += [_squat(i, hips=True) for i in range(20, 24)]  # N = 4 frames: START
+    poses += [_squat(i, hips=False) for i in range(24, 50)]  # 0,87 s sem quadril
+    for pose in poses:
+        result = pipeline.step(pose, pose.t)
+        assert result.safety_state is SafetyState.ACTIVE
+    assert _shift_events(fake) == [("press", "shift")]
+    assert fake.pressed == {"shift"}
+
+
+def test_crouch_keeps_tracking_without_hips_while_arming() -> None:
+    """Premissa 1: o quadril some já na descida (ARMING), antes de ``c`` passar de ``θ_on``
+    pela quarta vez; o gesto ainda ativa."""
+    pipeline, _, fake = _crouch_pipeline()
+    poses = [_stand(i) for i in range(20)]
+    poses += [_squat(20, hips=True)]  # 1º frame acima de θ_on: IDLE -> ARMING
+    poses += [_squat(i, hips=False) for i in range(21, 45)]
+    for pose in poses:
+        assert pipeline.step(pose, pose.t).safety_state is SafetyState.ACTIVE
+    assert fake.pressed == {"shift"}
+
+
+def test_crouch_released_when_standing_up_without_hips() -> None:
+    """Ao levantar com o quadril ainda fora, o END solta o ``shift``; só então a regra
+    volta a exigir o quadril e a pose sem ele deixa de ser tracking."""
+    pipeline, _, fake = _crouch_pipeline()
+    poses = [_stand(i) for i in range(20)]
+    poses += [_squat(i, hips=True) for i in range(20, 24)]
+    poses += [_squat(i, hips=False) for i in range(24, 30)]
+    poses += [make_body(t=i * DT, hips_visible=False) for i in range(30, 36)]  # em pé, sem quadril
+    for pose in poses[:-3]:
+        pipeline.step(pose, pose.t)
+    assert _shift_events(fake) == [("press", "shift"), ("release", "shift")]
+    last = poses[-1]
+    for k in range(1, 12):  # sem quadril e sem agachar: rejeitada, LOST depois de 0,2 s
+        result = pipeline.step(last, last.t + k * DT)
+    assert result.safety_state is SafetyState.LOST
+
+
+def test_no_hips_rejected_when_crouch_idle() -> None:
+    """Regressão do fantasma: com o agachar em IDLE a pose sem quadris NÃO é tracking, mesmo
+    com os ombros bem visíveis e baixos."""
+    pipeline, _, fake = _crouch_pipeline()
+    for i in range(20):
+        pipeline.step(_stand(i), i * DT)
+    states = [pipeline.step(_squat(i, hips=False), i * DT).safety_state for i in range(20, 40)]
+    assert states[-1] is SafetyState.LOST  # 20 frames = 0,67 s > lost_timeout_s (0,2 s)
+    assert _shift_events(fake) == []
+
+
+class _CountingCrouch(FeatureGesture):
+    """Gesto ``crouch`` de teste: conta os ``update`` (um por pose aceita pelo pipeline)."""
+
+    def __init__(self) -> None:
+        crouch = build_body_gestures({"crouch"})[0]
+        super().__init__("crouch", GestureKind.HOLD, SPY_PARAMS, crouch._feature)
+        self.updates = 0
+
+    def update(self, ctx: FrameContext) -> GestureEvent | None:
+        self.updates += 1
+        return super().update(ctx)
+
+
+def test_min_track_s_still_applies_to_shoulder_only_poses() -> None:
+    """A persistência continua valendo: depois de um quadro sem pose, a pose só de ombros
+    precisa de ``min_track_s`` de detecção contínua antes de chegar ao gesto."""
+    config = SafetyConfig(lost_timeout_s=1.0, min_track_s=0.5)
+    gesture = _CountingCrouch()
+    pipeline, _, _ = build([gesture], CROUCH_PROFILE, config)
+    poses = [_stand(i) for i in range(40)]
+    poses += [_squat(i, hips=True) for i in range(40, 44)]  # SPY_PARAMS: θ_on 0,5, debounce 1
+    for pose in poses:
+        pipeline.step(pose, pose.t)
+    assert gesture.snapshot().state is not GestureState.IDLE
+    before = gesture.updates
+    pipeline.step(None, 44 * DT)  # um quadro sem pose zera t₀
+    for i in range(45, 45 + 14):  # 14 frames = 0,47 s < min_track_s
+        pipeline.step(_squat(i, hips=False), i * DT)
+    assert gesture.updates == before
+    pipeline.step(_squat(60, hips=False), 60 * DT)  # 0,5 s contínuos: volta a valer
+    assert gesture.updates == before + 1

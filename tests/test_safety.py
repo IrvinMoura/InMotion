@@ -1,7 +1,10 @@
 """Spec 001 — SafetyManager: nenhum caminho deixa input pressionado."""
 
+from __future__ import annotations
+
 import math
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
@@ -17,6 +20,9 @@ from inmotion.safety import (
     register_atexit,
 )
 from tests.fakes import FakeInputBackend, SimulatedReleaseError
+
+if TYPE_CHECKING:
+    from inmotion.pipeline import Pipeline
 
 
 # Exceções próprias: NotImplementedError herda de RuntimeError, então usar RuntimeError
@@ -465,3 +471,49 @@ def test_on_stall_from_other_thread() -> None:
     assert manager.input.pressed == frozenset()
     assert fake.pressed == set()
     assert not manager.input.enabled
+
+
+# --- Spec 017 CA8: perder o tracking com o agachar ativo solta o shift ---------------------
+
+
+def _active_crouch_pipeline() -> tuple[Pipeline, SafetyManager, FakeInputBackend]:
+    from inmotion.config.schema import Binding, GameProfile
+    from inmotion.fps import FpsMeter
+    from inmotion.gestures.base import GestureKind
+    from inmotion.gestures.factory import build_body_gestures
+    from inmotion.pipeline import Pipeline
+    from tests.helpers import make_body
+
+    fake = FakeInputBackend()
+    safety = SafetyManager(
+        TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
+    )
+    profile = GameProfile("teste", {"crouch": Binding("shift", GestureKind.HOLD)})
+    pipeline = Pipeline(
+        safety, build_body_gestures({"crouch"}), FpsMeter(window=30), profile=profile
+    )
+    dt = 1 / 30
+    for i in range(20):
+        pipeline.step(make_body(t=i * dt), i * dt)
+    for i in range(20, 26):  # agachado, com o quadril ainda no quadro: START
+        pipeline.step(make_body(t=i * dt, shoulder_dy_px=120.0), i * dt)
+    assert fake.pressed == {"shift"}
+    return pipeline, safety, fake
+
+
+def test_crouch_released_after_lost_timeout() -> None:
+    """CA8: agachado e sem ombros (sem pose) por ``lost_timeout_s``, o ``shift`` é solto.
+    O alívio da regra de tracking (RF4) vale só para o quadril, nunca para os ombros."""
+    from tests.helpers import make_body
+
+    pipeline, safety, fake = _active_crouch_pipeline()
+    dt = 1 / 30
+    t = 26 * dt
+    pipeline.step(make_body(t=t, shoulder_dy_px=120.0, hips_visible=False), t)  # só ombros
+    assert fake.pressed == {"shift"}
+    gone = make_body(t=t, visibility=0.0)  # nem os ombros: pose fantasma
+    for k in range(1, 12):
+        pipeline.step(gone, t + k * dt)
+    assert safety.state is SafetyState.LOST
+    assert fake.pressed == set()
+    assert fake.released().count("shift") == 1

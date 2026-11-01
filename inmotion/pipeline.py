@@ -9,6 +9,7 @@ from inmotion.config.schema import GameProfile
 from inmotion.exit_zone import ExitZoneState
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
+from inmotion.gestures.base import GestureState
 from inmotion.gestures.body import BodyGesture, all_idle
 from inmotion.gestures.factory import build_arbiter
 from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context
@@ -25,6 +26,11 @@ TORSO: tuple[int, ...] = (
     PoseLandmark.LEFT_HIP,
     PoseLandmark.RIGHT_HIP,
 )
+
+
+# Só os ombros: basta para o tracking enquanto o agachar está em curso (ADR 0011).
+SHOULDERS: tuple[int, ...] = (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER)
+_CROUCH = "crouch"
 
 
 @dataclass(frozen=True)
@@ -67,6 +73,7 @@ class Pipeline:
         self._geometry = geometry if geometry is not None else GeometryConfig()
         self._baseline = BodyBaseline(baseline_params or BaselineParams())
         self._shoulder_baseline = BodyBaseline(baseline_params or BaselineParams())  # spec 017
+        self._crouch = next((g for g in self._gestures if g.name == _CROUCH), None)
         self._arbiter, self._combo = build_arbiter(
             [g.name for g in self._gestures], profile.arbiter
         )
@@ -79,7 +86,10 @@ class Pipeline:
 
         ``tracking_ok`` exige pose com o tronco visível (``min_torso_visibility`` em
         ombros e quadris): ao sair do quadro o MediaPipe pode devolver uma pose
-        "fantasma" de baixa visibilidade, que não pode segurar teclas. Os gestos só
+        "fantasma" de baixa visibilidade, que não pode segurar teclas. Exceção (spec 017
+        RF4, ADR 0011): com o ``crouch`` em ARMING ou ACTIVE e a segurança em ACTIVE, o
+        quadril sai do quadro ao agachar e bastam os ombros visíveis; em IDLE (e em LOST)
+        ombros e quadris continuam obrigatórios. Os gestos só
         rodam com pose rastreada e em ACTIVE; o ``StepResult`` ainda leva a pose crua
         não rastreada, para o overlay.
 
@@ -95,7 +105,8 @@ class Pipeline:
         """
         raw = pose
         config = self._safety.config
-        if pose is not None and not is_visible(pose, TORSO, config.min_torso_visibility):
+        required = SHOULDERS if self._crouch_in_progress() else TORSO
+        if pose is not None and not is_visible(pose, required, config.min_torso_visibility):
             pose = None
         if pose is None:
             self._tracked_since = None
@@ -124,6 +135,16 @@ class Pipeline:
                 self._mapper.update(t)
         fps = self._fps.update(t)
         return StepResult(t=t, fps=fps, safety_state=state, pose=raw if pose is None else pose)
+
+    def _crouch_in_progress(self) -> bool:
+        """RF4: o agachar está em ARMING ou ACTIVE e a segurança ainda está em ACTIVE.
+
+        Em LOST/PAUSED o gesto pode estar parado num estado velho (nada o atualiza até o
+        reset da volta a ACTIVE), por isso o estado da segurança também conta.
+        """
+        if self._crouch is None or self._safety.state is not SafetyState.ACTIVE:
+            return False
+        return self._crouch.snapshot().state in (GestureState.ARMING, GestureState.ACTIVE)
 
     def _reset_all(self) -> None:
         for gesture in self._gestures:
