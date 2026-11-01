@@ -502,3 +502,39 @@ def test_random_poses_property_is_not_vacuous() -> None:
             make_body(t=i * DT, right_arm=ARM_STRAIGHT_FORWARD), i * DT
         )  # soco direito mantido
     assert "mouse_left" in fake.pressed
+
+
+class _ProbeGesture(FeatureGesture):
+    """Gesto de teste: fica ativo a partir de ``t_on`` e guarda as duas bases R7 de cada quadro."""
+
+    def __init__(self, t_on: float) -> None:
+        super().__init__("spy", GestureKind.HOLD, SPY_PARAMS, self._probe)
+        self._t_on = t_on
+        self.bases: list[tuple[float | None, float | None]] = []
+
+    def _probe(self, ctx: FrameContext) -> float:
+        self.bases.append((ctx.baseline_px, ctx.shoulder_baseline_px))
+        return 1.0 if ctx.t >= self._t_on else 0.0
+
+
+def test_both_baselines_freeze_together() -> None:
+    """Spec 017: a base R7 dos ombros anda em repouso e congela junto com a do quadril."""
+    n_rest, n_active = 40, 30
+    probe = _ProbeGesture(t_on=n_rest * DT)
+    pipeline, _, _ = build([probe])
+    for i in range(n_rest + n_active):
+        moved = i >= n_rest - 5  # o corpo se mexe um pouco antes e durante o gesto
+        pose = make_body(
+            t=i * DT,
+            hip_y_px=300.0 + (3.0 * (i - n_rest + 5) if moved else 0.0),
+            shoulder_dy_px=2.0 * (i - n_rest + 5) if moved else 0.0,
+        )
+        pipeline.step(pose, i * DT)
+    hip_base, shoulder_base = zip(*probe.bases, strict=True)
+    assert (hip_base[0], shoulder_base[0]) == (None, None)  # ainda sem K amostras
+    assert None not in (hip_base[20], shoulder_base[20])
+    frozen = n_rest + 1  # o estado ACTIVE vale a partir do quadro seguinte à ativação
+    assert len(set(hip_base[frozen:])) == 1
+    assert len(set(shoulder_base[frozen:])) == 1
+    assert hip_base[frozen - 1] != hip_base[n_rest - 6]  # e antes disso ainda andava
+    assert shoulder_base[frozen - 1] != shoulder_base[n_rest - 6]

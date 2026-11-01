@@ -227,3 +227,56 @@ def test_crouch_drop_zero_at_baseline() -> None:
     c = crouch_drop(_shoulder_ctx(pose, sbase))
     assert c is not None
     assert c == pytest.approx(0.0, abs=1e-9)
+
+
+def test_shoulder_fields_without_hips() -> None:
+    """RF3/RF4: ``ȳ`` e ``s`` dos ombros saem em pixels mesmo sem quadris (esqueleto ``None``)."""
+    sbase = BodyBaseline(BaselineParams(init_frames=2))
+    hip_base = BodyBaseline(BaselineParams(init_frames=1))
+    pose = make_body(hips_visible=False, shoulder_dy_px=10.0)
+    ctx = build_context(pose, 0.0, GEOMETRY, hip_base, True, shoulder_baseline=sbase)
+    assert ctx.skeleton is None
+    assert ctx.hip_y_px is None
+    assert ctx.shoulder_px is None
+    assert ctx.shoulder_y_px == pytest.approx(300.0 - 150.0 + 10.0)  # quadril - tronco + descida
+    assert ctx.shoulder_width_px == pytest.approx(100.0)
+    assert ctx.shoulder_baseline_px is None  # 1 amostra de 2
+    ctx = build_context(pose, 0.0, GEOMETRY, hip_base, True, shoulder_baseline=sbase)
+    assert ctx.shoulder_baseline_px == pytest.approx(160.0)
+    assert hip_base.value is None  # a base do quadril não anda sem esqueleto
+
+
+def test_shoulder_fields_with_hips_match_skeleton_scale() -> None:
+    base = BodyBaseline(BaselineParams(init_frames=1))
+    sbase = BodyBaseline(BaselineParams(init_frames=1))
+    ctx = build_context(make_body(), 0.0, GEOMETRY, base, True, shoulder_baseline=sbase)
+    assert ctx.shoulder_width_px == pytest.approx(ctx.shoulder_px)
+    assert ctx.shoulder_y_px == pytest.approx(150.0)
+    assert ctx.shoulder_baseline_px == pytest.approx(150.0)
+
+
+def test_shoulder_fields_none_when_shoulders_unusable() -> None:
+    sbase = BodyBaseline(BaselineParams(init_frames=1))
+    base = BodyBaseline(BaselineParams(init_frames=1))
+    ctx = build_context(
+        make_body(visibility=0.0), 0.0, GEOMETRY, base, True, shoulder_baseline=sbase
+    )
+    assert ctx.shoulder_y_px is None
+    assert ctx.shoulder_width_px is None
+    assert sbase.value is None  # amostra inválida não vira base
+    tiny = make_body(scale=0.05)  # s = 5 px < min_shoulder_px
+    ctx = build_context(tiny, 0.0, GEOMETRY, base, True, shoulder_baseline=sbase)
+    assert ctx.shoulder_y_px is None
+    assert ctx.shoulder_width_px is None
+
+
+def test_shoulder_baseline_is_optional_and_frozen_when_not_resting() -> None:
+    base = BodyBaseline(BaselineParams(init_frames=1))
+    ctx = build_context(make_body(), 0.0, GEOMETRY, base, True)  # sem a segunda base
+    assert ctx.shoulder_baseline_px is None
+    assert ctx.shoulder_y_px == pytest.approx(150.0)
+    sbase = BodyBaseline(BaselineParams(init_frames=1, rate=0.5))
+    build_context(make_body(), 0.0, GEOMETRY, base, True, shoulder_baseline=sbase)
+    moved = make_body(shoulder_dy_px=40.0)
+    ctx = build_context(moved, 0.1, GEOMETRY, base, False, shoulder_baseline=sbase)
+    assert ctx.shoulder_baseline_px == pytest.approx(150.0)  # congelada fora de repouso

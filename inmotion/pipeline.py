@@ -66,6 +66,7 @@ class Pipeline:
         self._pose_filter = pose_filter
         self._geometry = geometry if geometry is not None else GeometryConfig()
         self._baseline = BodyBaseline(baseline_params or BaselineParams())
+        self._shoulder_baseline = BodyBaseline(baseline_params or BaselineParams())  # spec 017
         self._arbiter, self._combo = build_arbiter(
             [g.name for g in self._gestures], profile.arbiter
         )
@@ -132,11 +133,14 @@ class Pipeline:
             self._combo.reset()
         self._mapper.reset()
         self._baseline.reset()
+        self._shoulder_baseline.reset()
 
     def _run_gestures(self, pose: PoseFrame, t: float) -> None:
         """Repouso (estado do frame anterior) → contexto → gestos → árbitro → mapper."""
         resting = all_idle(self._gestures)
-        ctx = build_context(pose, t, self._geometry, self._baseline, resting)
+        ctx = build_context(
+            pose, t, self._geometry, self._baseline, resting, self._shoulder_baseline
+        )
         events = [e for g in self._gestures if (e := g.update(ctx)) is not None]
         if self._combo is not None:
             events.extend(self._combo.derive(events, t))

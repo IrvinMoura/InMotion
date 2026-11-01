@@ -43,7 +43,9 @@ class BaselineParams:
 
 
 class BodyBaseline:
-    """R7: base adaptativa da altura do quadril, ``b_n = (1−λ)·b_{n−1} + λ·h_n`` em repouso.
+    """R7: base adaptativa de uma altura, ``b_n = (1−λ)·b_{n−1} + λ·h_n`` em repouso.
+
+    Serve a qualquer altura em pixels: o quadril (pulo) e, na spec 017, os ombros (agachar).
 
     - A base inicial é a média de ``K`` amostras de repouso, nunca um frame único (RF3).
     - Fora do repouso (algum gesto de corpo fora de IDLE) a base fica congelada (J2).
@@ -99,6 +101,24 @@ class FrameContext:
     shoulder_baseline_px: float | None = None
 
 
+def _shoulder_line(pose: PoseFrame, geometry: GeometryConfig) -> tuple[float, float] | None:
+    """``(ȳ, s)`` dos ombros em pixels, sem exigir os quadris (spec 017 RF3).
+
+    ``ȳ = (y₁₁ + y₁₂)/2`` e ``s = ‖p₁₁ − p₁₂‖`` (A6, a mesma escala do esqueleto). ``None`` se
+    algum ombro está abaixo do limiar de visibilidade, se ``s < min_shoulder_px`` ou se os
+    valores não são finitos.
+    """
+    if not is_visible(pose, _SHOULDERS, geometry.visibility_threshold):
+        return None
+    px = pose.pixels()
+    left, right = px[_SHOULDERS[0]], px[_SHOULDERS[1]]
+    s = float(np.hypot(left[0] - right[0], left[1] - right[1]))
+    y = float((left[1] + right[1]) / 2.0)
+    if not (math.isfinite(s) and math.isfinite(y)) or s < geometry.min_shoulder_px:
+        return None
+    return y, s
+
+
 def build_context(
     pose: PoseFrame,
     t: float,
@@ -107,20 +127,38 @@ def build_context(
     resting: bool,
     shoulder_baseline: BodyBaseline | None = None,
 ) -> FrameContext:
-    """Monta o contexto do frame: esqueleto normalizado (A6), ``s``, ``h`` e a base R7.
+    """Monta o contexto do frame: esqueleto normalizado (A6), ``s``, ``h`` e as bases R7.
 
     ``h`` é a ordenada do centro do quadril em pixels (y cresce para baixo) e ``s`` a
-    largura dos ombros em pixels. A base só é atualizada se houver esqueleto e ``resting``.
-    Sem esqueleto (visibilidade ou ``s`` degenerado), ``shoulder_px`` e ``hip_y_px`` são
-    ``None`` e a base não muda.
+    largura dos ombros em pixels. A base do quadril só é atualizada se houver esqueleto e
+    ``resting``. Sem esqueleto (visibilidade ou ``s`` degenerado), ``shoulder_px`` e
+    ``hip_y_px`` são ``None`` e a base do quadril não muda.
+
+    Spec 017: os ombros também são medidos direto em pixels (``shoulder_y_px``,
+    ``shoulder_width_px``), **sem exigir os quadris**, e uma segunda base R7
+    (``shoulder_baseline``, opcional) acompanha ``ȳ_ombros`` com a mesma regra de repouso:
+    só anda com ``resting`` e ombros válidos, e fica congelada fora disso.
     """
+    shoulders = _shoulder_line(pose, geometry)
+    shoulder_y, shoulder_w = shoulders if shoulders is not None else (None, None)
+    shoulder_base: float | None = None
+    if shoulder_baseline is not None:
+        shoulder_base = (
+            shoulder_baseline.update(shoulder_y, resting)
+            if shoulder_y is not None
+            else shoulder_baseline.value
+        )
     skeleton = normalize_skeleton(pose, geometry)
     if skeleton is None:
-        return FrameContext(t, pose, None, None, None, baseline.value)
+        return FrameContext(
+            t, pose, None, None, None, baseline.value, shoulder_y, shoulder_w, shoulder_base
+        )
     px = pose.pixels()
     hip_y = float((px[_HIPS[0], 1] + px[_HIPS[1], 1]) / 2.0)
     base = baseline.update(hip_y, resting)
-    return FrameContext(t, pose, skeleton, skeleton.shoulder_px, hip_y, base)
+    return FrameContext(
+        t, pose, skeleton, skeleton.shoulder_px, hip_y, base, shoulder_y, shoulder_w, shoulder_base
+    )
 
 
 def forward_reach(pose: PoseFrame, side: Side, geometry: GeometryConfig) -> float | None:
