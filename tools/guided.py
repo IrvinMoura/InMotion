@@ -55,13 +55,17 @@ class Phase(Enum):
 @dataclass(frozen=True)
 class GuidedStep:
     """Um passo do roteiro: ``gesture=None`` com ``expected=0`` é "parado" (nenhuma tecla);
-    ``expected=None`` não é pontuado (ex.: posicionar-se)."""
+    ``expected=None`` não é pontuado (ex.: posicionar-se). ``at_least`` aceita ``got >=
+    expected`` (uma pausa curta na marcha gera um segundo ``w``); ``allow`` lista gestos cujas
+    teclas não são extras no passo (correr: ``w`` junto com ``ctrl``)."""
 
     label: str
     title: str
     duration_s: float
     gesture: str | None
     expected: int | None
+    at_least: bool = False
+    allow: tuple[str, ...] = ()
 
 
 def default_steps(handedness: str) -> tuple[GuidedStep, ...]:
@@ -98,19 +102,21 @@ def crouch_steps(handedness: str) -> tuple[GuidedStep, ...]:
 
 
 def march_steps(handedness: str) -> tuple[GuidedStep, ...]:
-    """Roteiro da spec 018 T0 (~85 s): coleta de marcha lenta e rápida.
+    """Roteiro da spec 018 (~85 s): marcha lenta (``w``), marcha rápida (``w`` + ``ctrl``),
+    pausas paradas, pulos e agachamentos.
 
-    Os passos de marcha ainda não têm nota (``expected=None``): servem para medir a elevação
-    dos joelhos e os intervalos entre passos. As pausas paradas, os pulos e os agachamentos
-    continuam pontuados, para ver se a marcha atrapalha os outros gestos.
+    Na T0 a marcha não tinha nota (coleta). Desde a T8: marcha lenta exige pelo menos um
+    ``w`` e nenhum ``ctrl``; marcha rápida exige pelo menos um ``ctrl``, com o ``w`` permitido.
     """
     del handedness  # o roteiro não usa os braços
     return (
         GuidedStep("setup", "VA PARA A DISTANCIA, CORPO INTEIRO NA TELA", 6.0, None, None),
         GuidedStep("rest", "FIQUE PARADO", 6.0, None, 0),
-        GuidedStep("march_slow", "MARCHE DEVAGAR, JOELHOS ALTOS", 10.0, "walk", None),
+        GuidedStep("march_slow", "MARCHE DEVAGAR, JOELHOS ALTOS", 10.0, "walk", 1, at_least=True),
         GuidedStep("rest_mid", "PARE E FIQUE PARADO", 5.0, None, 0),
-        GuidedStep("march_fast", "MARCHE RAPIDO", 10.0, "walk", None),
+        GuidedStep(
+            "march_fast", "MARCHE RAPIDO", 10.0, "sprint", 1, at_least=True, allow=("walk",)
+        ),
         GuidedStep("rest_mid2", "PARE E FIQUE PARADO", 5.0, None, 0),
         GuidedStep("jump", "3 PULOS", 9.0, "jump", 3),
         GuidedStep("crouch", "2 AGACHAMENTOS", 10.0, "crouch", 2),
@@ -185,9 +191,15 @@ def score_steps(
         start, end = schedule.run_window(i)
         key = gesture_keys.get(step.gesture) if step.gesture else None
         got = sum(1 for t, k in presses if k == key and start <= t < end + grace_s)
+        allowed = {key} | {gesture_keys[g] for g in step.allow if g in gesture_keys}
         held = () if releases is None else _held_at(presses, releases, start, exclude=key)
-        extras = held + tuple(k for t, k in presses if k != key and start <= t < end)
-        ok = None if step.expected is None else (got == step.expected and not extras)
+        extras = tuple(k for k in held if k not in allowed) + tuple(
+            k for t, k in presses if k not in allowed and start <= t < end
+        )
+        enough = step.expected is not None and (
+            got >= step.expected if step.at_least else got == step.expected
+        )
+        ok = None if step.expected is None else (enough and not extras)
         scores.append(StepScore(step.label, step.title, step.expected, got, extras, ok))
     return scores
 

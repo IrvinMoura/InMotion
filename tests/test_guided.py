@@ -180,9 +180,9 @@ def test_march_script_for_spec_018_t0() -> None:
     steps = SCRIPTS["march"]("right")
     by_label = {s.label: s for s in steps}
     assert len(by_label) == len(steps)  # rótulos únicos (viram LabelInterval)
-    for label in ("march_slow", "march_fast"):
-        assert by_label[label].gesture == "walk"
-        assert by_label[label].expected is None
+    # desde a T8 a marcha é pontuada (ver test_march_script_scores_walk_and_sprint_now)
+    assert by_label["march_slow"].expected == 1
+    assert by_label["march_fast"].expected == 1
     assert by_label["jump"].expected == 3
     assert by_label["crouch"].expected == 2
     assert all(s.expected == 0 for s in steps if s.label.startswith("rest"))
@@ -198,3 +198,38 @@ def test_unscored_data_steps_are_labelled_too() -> None:
     )
     labels = step_labels(Schedule(steps, prep_s=1.0))
     assert [lb.gesture for lb in labels] == ["march_slow", "rest"]
+
+
+def test_at_least_and_allowed_keys_for_march_steps() -> None:
+    """018 T8: marcha conta "pelo menos 1" e, na rápida, o `w` junto com o `ctrl` é permitido;
+    `ctrl` na marcha lenta continua sendo extra (reprova)."""
+    steps = (
+        GuidedStep("march_slow", "MARCHE", 4.0, gesture="walk", expected=1, at_least=True),
+        GuidedStep(
+            "march_fast",
+            "CORRA",
+            4.0,
+            gesture="sprint",
+            expected=1,
+            at_least=True,
+            allow=("walk",),
+        ),
+    )
+    keys = {"walk": "w", "sprint": "ctrl"}
+    sched = Schedule(steps, prep_s=1.0)  # janelas: [1, 5) e [6, 10)
+    presses = [(1.5, "w"), (3.0, "w"), (6.5, "w"), (7.0, "ctrl")]
+    slow, fast = score_steps(sched, presses, keys, grace_s=0.5)
+    assert (slow.got, slow.ok) == (2, True)
+    assert (fast.got, fast.extras, fast.ok) == (1, (), True)
+    slow_bad, _ = score_steps(sched, [(1.5, "w"), (2.0, "ctrl")], keys, grace_s=0.5)
+    assert slow_bad.ok is False
+
+
+def test_march_script_scores_walk_and_sprint_now() -> None:
+    from tools.guided import SCRIPTS
+
+    by_label = {s.label: s for s in SCRIPTS["march"]("right")}
+    assert by_label["march_slow"].gesture == "walk"
+    assert by_label["march_slow"].at_least
+    assert by_label["march_fast"].gesture == "sprint"
+    assert by_label["march_fast"].allow == ("walk",)
