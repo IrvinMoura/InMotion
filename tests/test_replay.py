@@ -15,7 +15,7 @@ from inmotion.pipeline import Pipeline, StepResult
 from inmotion.recorder import Recorder, load_recording
 from inmotion.recording import Recording, RecordingMeta
 from inmotion.replay import RecordingInputBackend, run_replay
-from inmotion.safety import SafetyConfig, SafetyManager
+from inmotion.safety import SafetyConfig, SafetyManager, TrackedInput
 from inmotion.types import PoseFrame
 from tests.fakes import FakeInputBackend
 from tests.helpers import make_body
@@ -179,3 +179,84 @@ def test_tool_main_returns_zero(tmp_path: Path, caplog: pytest.LogCaptureFixture
 
 def test_tool_main_missing_file_returns_one(tmp_path: Path) -> None:
     assert main(["--recording", str(tmp_path / "nao_existe.npz")]) == 1
+
+
+# --- Spec 017 T8: sessões guiadas reais como regressão do agachar pelos ombros ---
+# Recortes de recordings/guided_p1_20261101-030711 (2 m) e -030843 (1,5 m), coordenadas
+# arredondadas a 1e-4 (~0,06 px) para caber em 1 MB (ADR 0008). Roteiro: parado, 3 pulos,
+# 3 agachamentos, 3 inclinações para frente.
+
+FIXTURES = Path(__file__).parent / "fixtures" / "sessions"
+CROUCH_FIXTURES = ("crouch_2m.npz", "crouch_1m5.npz")
+LATENCY_S = 0.6  # tolerância: tecla logo após o fim do passo ainda é dele
+
+
+def _replay_like_app(name: str, rest_band: float | None = None) -> tuple[Recording, list]:
+    """Replay com a mesma montagem do app (config, perfil, filtro One Euro)."""
+    from dataclasses import replace
+
+    from inmotion.app import pose_filter_from_config
+    from inmotion.config.loader import load_config
+    from inmotion.gestures.factory import build_body_gestures
+    from inmotion.vision.landmarks import Side
+
+    rec = load_recording(FIXTURES / name)
+    config, profile = load_config(game="minecraft")
+    assert profile is not None
+    baseline = (
+        config.baseline if rest_band is None else replace(config.baseline, rest_band=rest_band)
+    )
+
+    def build(backend: InputBackend) -> tuple[Pipeline, SafetyManager]:
+        safety = SafetyManager(TrackedInput(backend, config.safety.always_release), config.safety)
+        gestures = build_body_gestures(
+            profile.bindings,
+            Side(config.handedness),
+            config.gestures,
+            config.geometry,
+            config.crouch.feature,
+        )
+        pipeline = Pipeline(
+            safety,
+            gestures,
+            FpsMeter(),
+            pose_filter_from_config(config.filters),
+            profile=profile,
+            mapper_params=config.mapper,
+            baseline_params=baseline,
+            geometry=config.geometry,
+        )
+        return pipeline, safety
+
+    result = run_replay(rec, build)
+    return rec, [(t, key) for t, kind, key in result.inputs if kind == "press"]
+
+
+def _presses_in(rec: Recording, label: str, presses: list) -> list[str]:
+    lb = next(x for x in rec.labels if x.gesture == label)
+    return [key for t, key in presses if lb.start <= t < lb.end + LATENCY_S]
+
+
+@pytest.mark.parametrize("name", CROUCH_FIXTURES)
+def test_crouch_once_per_squat(name: str) -> None:
+    """CA6: 3 agachamentos → 3 `shift`, sem pulo ao levantar (base R7 com portão)."""
+    rec, presses = _replay_like_app(name)
+    keys = _presses_in(rec, "crouch", presses)
+    assert keys.count("shift") == 3
+    assert "space" not in keys
+    # `mouse_right` agachado (braço à frente para equilibrar) é aceito: decisão de 01/11/2026
+
+
+@pytest.mark.parametrize("name", CROUCH_FIXTURES)
+def test_forward_lean_does_not_crouch(name: str) -> None:
+    """CA7: inclinar não aperta nada; a agachadinha antes do pulo não vira `shift`."""
+    rec, presses = _replay_like_app(name)
+    assert _presses_in(rec, "lean", presses) == []
+    assert _presses_in(rec, "rest", presses) == []
+    assert _presses_in(rec, "jump", presses) == ["space", "space", "space"]
+
+
+def test_without_baseline_gate_standing_up_jumps() -> None:
+    """Controle: sem o portão de desvio da base, levantar do agachar gera `space`."""
+    rec, presses = _replay_like_app("crouch_2m.npz", rest_band=1e6)
+    assert "space" in _presses_in(rec, "crouch", presses)
