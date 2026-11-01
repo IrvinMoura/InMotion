@@ -170,3 +170,19 @@ def test_cli_set_overrides_are_repeatable() -> None:
     args = _build_parser().parse_args(["--set", "handedness=left", "--set", "camera.index=0"])
     assert args.set == ["handedness=left", "camera.index=0"]
     assert _build_parser().parse_args([]).set == []
+
+
+def test_march_script_for_spec_018_t0() -> None:
+    """Coleta da 018 T0: marcha lenta e rápida (sem nota até existir o gesto), pausas
+    paradas, pulos e agachamentos pontuados."""
+    from tools.guided import SCRIPTS
+
+    steps = SCRIPTS["march"]("right")
+    by_label = {s.label: s for s in steps}
+    assert len(by_label) == len(steps)  # rótulos únicos (viram LabelInterval)
+    for label in ("march_slow", "march_fast"):
+        assert by_label[label].gesture == "walk"
+        assert by_label[label].expected is None
+    assert by_label["jump"].expected == 3
+    assert by_label["crouch"].expected == 2
+    assert all(s.expected == 0 for s in steps if s.label.startswith("rest"))

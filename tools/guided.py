@@ -97,9 +97,31 @@ def crouch_steps(handedness: str) -> tuple[GuidedStep, ...]:
     )
 
 
+def march_steps(handedness: str) -> tuple[GuidedStep, ...]:
+    """Roteiro da spec 018 T0 (~85 s): coleta de marcha lenta e rápida.
+
+    Os passos de marcha ainda não têm nota (``expected=None``): servem para medir a elevação
+    dos joelhos e os intervalos entre passos. As pausas paradas, os pulos e os agachamentos
+    continuam pontuados, para ver se a marcha atrapalha os outros gestos.
+    """
+    del handedness  # o roteiro não usa os braços
+    return (
+        GuidedStep("setup", "VA PARA A DISTANCIA, CORPO INTEIRO NA TELA", 6.0, None, None),
+        GuidedStep("rest", "FIQUE PARADO", 6.0, None, 0),
+        GuidedStep("march_slow", "MARCHE DEVAGAR, JOELHOS ALTOS", 10.0, "walk", None),
+        GuidedStep("rest_mid", "PARE E FIQUE PARADO", 5.0, None, 0),
+        GuidedStep("march_fast", "MARCHE RAPIDO", 10.0, "walk", None),
+        GuidedStep("rest_mid2", "PARE E FIQUE PARADO", 5.0, None, 0),
+        GuidedStep("jump", "3 PULOS", 9.0, "jump", 3),
+        GuidedStep("crouch", "2 AGACHAMENTOS", 10.0, "crouch", 2),
+        GuidedStep("rest_end", "FIQUE PARADO", 6.0, None, 0),
+    )
+
+
 SCRIPTS: Mapping[str, Callable[[str], tuple[GuidedStep, ...]]] = {
     "full": default_steps,
     "crouch": crouch_steps,
+    "march": march_steps,
 }
 
 
@@ -390,7 +412,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="sobrescreve a config (repetível), ex.: --set handedness=left",
     )
     parser.add_argument(
-        "--script", choices=sorted(SCRIPTS), default="full", help="roteiro (crouch = spec 017 T7)"
+        "--script",
+        choices=sorted(SCRIPTS),
+        default="full",
+        help="roteiro (crouch = spec 017 T7; march = spec 018 T0)",
     )
     return parser
 
