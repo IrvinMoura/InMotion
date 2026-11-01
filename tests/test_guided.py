@@ -186,3 +186,15 @@ def test_march_script_for_spec_018_t0() -> None:
     assert by_label["jump"].expected == 3
     assert by_label["crouch"].expected == 2
     assert all(s.expected == 0 for s in steps if s.label.startswith("rest"))
+
+
+def test_unscored_data_steps_are_labelled_too() -> None:
+    """Bug da 018 T0: a marcha (sem nota) ficou sem rótulo na gravação. Todo passo com
+    gesto ou nota vira rótulo; só o posicionar-se (sem gesto e sem nota) fica de fora."""
+    steps = (
+        GuidedStep("setup", "POSICIONE-SE", 2.0, gesture=None, expected=None),
+        GuidedStep("march_slow", "MARCHE", 4.0, gesture="walk", expected=None),
+        GuidedStep("rest", "PARADO", 2.0, gesture=None, expected=0),
+    )
+    labels = step_labels(Schedule(steps, prep_s=1.0))
+    assert [lb.gesture for lb in labels] == ["march_slow", "rest"]

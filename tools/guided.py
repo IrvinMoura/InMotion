@@ -212,11 +212,15 @@ def _held_at(
 
 
 def step_labels(schedule: Schedule) -> list[LabelInterval]:
-    """Rótulos da gravação: a janela de execução de cada passo pontuado."""
+    """Rótulos da gravação: a janela de execução de cada passo com gesto ou com nota.
+
+    Passos de coleta sem nota (ex.: marcha da spec 018 T0) também viram rótulo; só fica de
+    fora o passo sem gesto e sem nota (posicionar-se).
+    """
     return [
         LabelInterval(step.label, *schedule.run_window(i))
         for i, step in enumerate(schedule.steps)
-        if step.expected is not None
+        if step.expected is not None or step.gesture is not None
     ]
 
 
