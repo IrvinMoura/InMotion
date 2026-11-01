@@ -125,22 +125,22 @@ def score_steps(
     presses: Sequence[tuple[float, KeyName]],
     gesture_keys: Mapping[str, KeyName],
     grace_s: float = GRACE_S,
-    releases: Sequence[tuple[float, KeyName]] = (),
+    releases: Sequence[tuple[float, KeyName]] | None = None,
 ) -> list[StepScore]:
     """Compara as teclas que teriam sido apertadas com o esperado de cada passo.
 
     A tecla esperada conta em ``[início, fim + grace_s)``; qualquer outra tecla apertada
     durante a execução do passo, **ou apertada antes e ainda segurada quando ele começa**,
-    é "extra" e reprova. Passo com ``expected=None`` não é pontuado.
+    é "extra" e reprova (só com ``releases``; ``None`` = soltas não registradas, não checa).
+    Passo com ``expected=None`` não é pontuado.
     """
     scores: list[StepScore] = []
     for i, step in enumerate(schedule.steps):
         start, end = schedule.run_window(i)
         key = gesture_keys.get(step.gesture) if step.gesture else None
         got = sum(1 for t, k in presses if k == key and start <= t < end + grace_s)
-        extras = _held_at(presses, releases, start, exclude=key) + tuple(
-            k for t, k in presses if k != key and start <= t < end
-        )
+        held = () if releases is None else _held_at(presses, releases, start, exclude=key)
+        extras = held + tuple(k for t, k in presses if k != key and start <= t < end)
         ok = None if step.expected is None else (got == step.expected and not extras)
         scores.append(StepScore(step.label, step.title, step.expected, got, extras, ok))
     return scores
