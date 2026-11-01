@@ -276,3 +276,32 @@ def test_shoulder_baseline_is_optional_and_frozen_when_not_resting() -> None:
     moved = make_body(shoulder_dy_px=40.0)
     ctx = build_context(moved, 0.1, GEOMETRY, base, False, shoulder_baseline=sbase)
     assert ctx.shoulder_baseline_px == pytest.approx(150.0)  # congelada fora de repouso
+
+
+# --- Spec 017 T7: base R7 com portão de desvio (contaminação na descida do agachar) ---
+
+
+def test_baseline_ignores_samples_far_from_it() -> None:
+    """Descendo para agachar (c ainda < θ_on conta como repouso), a base não pode seguir
+    o quadril: só anda com |h − b|/s < rest_band. Sem isso, ao levantar, j > θ_on do pulo."""
+    base = BodyBaseline(BaselineParams(init_frames=1, rate=0.5, rest_band=0.15))
+    base.update(300.0, resting=True, scale=100.0)
+    assert base.value == pytest.approx(300.0)
+    base.update(330.0, resting=True, scale=100.0)  # 0,30 s de desvio: ignorado
+    assert base.value == pytest.approx(300.0)
+    base.update(310.0, resting=True, scale=100.0)  # 0,10 s: anda (EMA)
+    assert base.value == pytest.approx(305.0)
+
+
+def test_baseline_without_scale_keeps_old_behaviour() -> None:
+    base = BodyBaseline(BaselineParams(init_frames=1, rate=0.5))
+    base.update(300.0, resting=True)
+    base.update(400.0, resting=True)
+    assert base.value == pytest.approx(350.0)
+
+
+def test_rest_band_validation() -> None:
+    assert BaselineParams().rest_band == pytest.approx(0.15)
+    for bad in (0.0, -1.0, float("nan")):
+        with pytest.raises(ValueError, match="rest_band"):
+            BaselineParams(rest_band=bad)

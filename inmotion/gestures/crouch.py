@@ -15,7 +15,7 @@ CROUCH_FEATURES: tuple[str, ...] = get_args(CrouchFeature)
 # Limiar PROVISÓRIO do ``crouch_drop`` (em larguras de ombro): agachadinha do pulo máx 0,66,
 # inclinar máx 0,22, agachar mediana >= 1,18 (sessões guiadas de 01/11/2026). Recalibrar na
 # spec 017 T7. Para ``feature="hip"`` os valores antigos eram theta_on 0,35 e theta_off 0,25.
-DEFAULT_CROUCH_PARAMS = GestureParams(1.0, 0.7, Direction.ABOVE, debounce_frames=4)
+DEFAULT_CROUCH_PARAMS = GestureParams(0.9, 0.6, Direction.ABOVE, debounce_frames=4)
 
 _FEATURES: dict[str, Callable[[FrameContext], float | None]] = {
     "hip": crouch_depth,

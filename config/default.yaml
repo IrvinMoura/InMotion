@@ -46,10 +46,11 @@ gestures:
   attack: {theta_on: 0.70, theta_off: 0.55, direction: above, debounce_frames: 3, cooldown_s: 0.0}
   use:    {theta_on: 0.70, theta_off: 0.55, direction: above, debounce_frames: 3, cooldown_s: 0.0}
   jump:   {theta_on: 0.25, theta_off: 0.15, direction: above, debounce_frames: 2, cooldown_s: 0.0}
-  # crouch: limiar PROVISÓRIO (spec 017): agachadinha do pulo máx 0,66, inclinar máx 0,22,
-  # agachar mediana >= 1,18 (sessões guiadas de 01/11/2026); recalibrar na spec 017 T7.
+  # crouch (spec 017 T7, 5 sessões guiadas de 01/11/2026): agachadinha do pulo máx 0,66 e
+  # inclinar máx 0,22; agachar mediana >= 1,18. theta_on 0,9 = 1,36x a agachadinha e dá
+  # mais folga ao ARMING com o quadril ainda visível (com 1,0: visibilidade mín 0,59).
   # Com crouch.feature: hip os valores antigos eram theta_on 0.35 e theta_off 0.25.
-  crouch: {theta_on: 1.0,  theta_off: 0.7,  direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  crouch: {theta_on: 0.9,  theta_off: 0.6,  direction: above, debounce_frames: 4, cooldown_s: 0.0}
   walk:   {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
 
 # Sinal do agachar (spec 017 RF3): shoulders = queda dos ombros (continua visível sem o
@@ -62,6 +63,10 @@ crouch:
 baseline:
   init_frames: 15
   rate: 0.02
+  # A base só anda com |h - b|/s < rest_band (larguras de ombro). Sem isso a descida do
+  # agachar arrastava a base e, ao levantar, saía um pulo (3 de 9 agachamentos em
+  # 01/11/2026); 0,15 = theta_off do pulo, acima do ruído parado (|j| <= 0,05).
+  rest_band: 0.15
 
 # ActionMapper: duração do tap de um gesto trigger (> 1 tick de 50 ms do Minecraft).
 mapper:

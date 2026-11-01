@@ -30,16 +30,20 @@ _SHOULDERS = (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER)
 
 @dataclass(frozen=True)
 class BaselineParams:
-    """Parâmetros da base R7: ``K`` frames iniciais e taxa ``λ`` da EMA lenta (por frame)."""
+    """Parâmetros da base R7: ``K`` frames iniciais, taxa ``λ`` da EMA lenta (por frame) e
+    ``rest_band``: desvio máximo ``|h − b|/s`` (larguras de ombro) para a base andar."""
 
     init_frames: int = 15
     rate: float = 0.02
+    rest_band: float = 0.15
 
     def __post_init__(self) -> None:
         if self.init_frames < 1:
             raise ValueError("init_frames deve ser >= 1")
         if not (math.isfinite(self.rate) and 0.0 < self.rate <= 1.0):
             raise ValueError("rate deve estar em (0, 1]")
+        if not (math.isfinite(self.rest_band) and self.rest_band > 0.0):
+            raise ValueError("rest_band deve ser finito e > 0")
 
 
 class BodyBaseline:
@@ -53,6 +57,11 @@ class BodyBaseline:
       máximo das amostras) e R3 (resposta a degrau com constante de tempo ``1/λ`` frames).
     - J3: uma deriva lenta de ``h`` (velocidade ``v`` por frame) é seguida com defasagem
       estacionária ``v/λ``, abaixo do limiar do pulo se ``v/λ ≪ θ·s``.
+    - Portão de desvio (spec 017 T7): com a escala ``s`` informada, a amostra só entra se
+      ``|h − b|/s < rest_band``. A descida para agachar ainda conta como repouso (``c`` <
+      θ_on); sem o portão a base seguia o quadril e, de pé de novo, ``j`` passava do
+      limiar do pulo (sessões guiadas de 01/11/2026). Com o portão, a deriva lenta (J3)
+      continua absorvida, pois ``v/λ`` fica abaixo de ``rest_band·s``.
     """
 
     def __init__(self, params: BaselineParams) -> None:
@@ -65,9 +74,20 @@ class BodyBaseline:
         """Base atual (px) ou ``None`` até acumular ``K`` amostras."""
         return self._value
 
-    def update(self, h: float, resting: bool) -> float | None:
-        """Incorpora ``h`` (px) se ``resting`` e finito; devolve a base ou ``None`` (< K)."""
+    def update(self, h: float, resting: bool, scale: float | None = None) -> float | None:
+        """Incorpora ``h`` (px) se ``resting``, finito e perto da base; devolve a base.
+
+        ``scale`` é a largura dos ombros ``s`` (px) do frame; sem ela, não há portão de
+        desvio. Devolve ``None`` enquanto houver menos de ``K`` amostras."""
         if not resting or not math.isfinite(h):
+            return self._value
+        if (
+            self._value is not None
+            and scale is not None
+            and math.isfinite(scale)
+            and scale > 0.0
+            and abs(h - self._value) / scale >= self._params.rest_band
+        ):
             return self._value
         if self._value is None:
             self._samples.append(h)
@@ -144,7 +164,7 @@ def build_context(
     shoulder_base: float | None = None
     if shoulder_baseline is not None:
         shoulder_base = (
-            shoulder_baseline.update(shoulder_y, resting)
+            shoulder_baseline.update(shoulder_y, resting, shoulder_w)
             if shoulder_y is not None
             else shoulder_baseline.value
         )
@@ -155,7 +175,7 @@ def build_context(
         )
     px = pose.pixels()
     hip_y = float((px[_HIPS[0], 1] + px[_HIPS[1], 1]) / 2.0)
-    base = baseline.update(hip_y, resting)
+    base = baseline.update(hip_y, resting, skeleton.shoulder_px)
     return FrameContext(
         t, pose, skeleton, skeleton.shoulder_px, hip_y, base, shoulder_y, shoulder_w, shoulder_base
     )
