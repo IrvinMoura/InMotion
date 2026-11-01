@@ -20,7 +20,7 @@ import argparse
 import json
 import logging
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -77,6 +77,29 @@ def default_steps(handedness: str) -> tuple[GuidedStep, ...]:
         GuidedStep("lean", "INCLINE PARA FRENTE E SEGURE", 6.0, "walk", 1),
         GuidedStep("rest_end", "FIQUE PARADO", 8.0, None, 0),
     )
+
+
+def crouch_steps(handedness: str) -> tuple[GuidedStep, ...]:
+    """Roteiro da spec 017 T7 (~75 s): agachadinha do pulo, agachar e inclinar sem tecla.
+
+    O passo de inclinar espera **nenhuma** tecla: inclinar não pode agachar (RF3b), e o
+    ``walk`` fica fora do perfil do Minecraft até a spec 018.
+    """
+    del handedness  # o roteiro não usa os braços
+    return (
+        GuidedStep("setup", "VA PARA A DISTANCIA, CORPO INTEIRO NA TELA", 6.0, None, None),
+        GuidedStep("rest", "FIQUE PARADO", 8.0, None, 0),
+        GuidedStep("jump", "3 PULOS", 9.0, "jump", 3),
+        GuidedStep("crouch", "3 AGACHAMENTOS: DESCA, SEGURE 1 s, SUBA", 14.0, "crouch", 3),
+        GuidedStep("lean", "3x INCLINE PARA FRENTE E VOLTE", 10.0, None, 0),
+        GuidedStep("rest_end", "FIQUE PARADO", 8.0, None, 0),
+    )
+
+
+SCRIPTS: Mapping[str, Callable[[str], tuple[GuidedStep, ...]]] = {
+    "full": default_steps,
+    "crouch": crouch_steps,
+}
 
 
 class Schedule:
@@ -358,6 +381,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--out", type=Path, default=None, help="gravação .npz (padrão: recordings/)"
     )
     parser.add_argument("--fullscreen", action="store_true", help="janela em tela cheia")
+    parser.add_argument(
+        "--script", choices=sorted(SCRIPTS), default="full", help="roteiro (crouch = spec 017 T7)"
+    )
     return parser
 
 
@@ -401,7 +427,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         baseline_params=config.baseline,
         geometry=config.geometry,
     )
-    schedule = Schedule(default_steps(config.handedness))
+    schedule = Schedule(SCRIPTS[args.script](config.handedness))
     preprocess = Preprocessor(config.preprocess).apply
     try:
         estimator = MediaPipePoseEstimator(config.pose)

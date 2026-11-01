@@ -134,3 +134,27 @@ def test_key_held_into_a_step_counts_as_extra() -> None:
     # solto antes do passo começar: não conta
     rest2, _, _ = score_steps(sched, presses, KEYS, grace_s=0.5, releases=[(1.5, "w")])
     assert rest2.ok is True
+
+
+def test_crouch_script_for_spec_017_t7() -> None:
+    """Roteiro da T7: pulos (agachadinha), 3 agachamentos e 3 inclinações sem tecla."""
+    from tools.guided import SCRIPTS
+
+    steps = SCRIPTS["crouch"]("right")
+    by_label = {s.label: s for s in steps}
+    assert by_label["jump"].gesture == "jump"
+    assert by_label["jump"].expected == 3
+    assert by_label["crouch"].gesture == "crouch"
+    assert by_label["crouch"].expected == 3
+    # inclinar para frente não pode agachar nem apertar nada (RF3b; walk fora do perfil)
+    assert by_label["lean"].gesture is None
+    assert by_label["lean"].expected == 0
+    assert steps[0].expected is None  # posicionar-se não pontua
+    assert SCRIPTS["full"]("left") == default_steps("left")
+
+
+def test_cli_accepts_script_choice() -> None:
+    from tools.guided import _build_parser
+
+    assert _build_parser().parse_args([]).script == "full"
+    assert _build_parser().parse_args(["--script", "crouch"]).script == "crouch"
