@@ -54,7 +54,6 @@ def test_combo_same_frame_and_validation() -> None:
             ComboGesture("both", members)
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 017 T2")
 def test_arbiter_built_from_profile_config() -> None:
     """CA1: o árbitro segue a prioridade, os grupos e o combo da config (não do código)."""
     config = ArbiterConfig(

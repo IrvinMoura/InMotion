@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-from inmotion.gestures.arbiter import ArbiterConfig, GestureArbiter
+from inmotion.gestures.arbiter import DEFAULT_ARBITER, ArbiterConfig, GestureArbiter
 from inmotion.gestures.base import GestureParams
 from inmotion.gestures.body import FeatureGesture
 from inmotion.gestures.combo import ComboGesture
@@ -21,9 +21,6 @@ from inmotion.vision.geometry import GeometryConfig
 from inmotion.vision.landmarks import Side
 
 BODY_GESTURE_NAMES: frozenset[str] = frozenset({"attack", "use", "jump", "crouch", "walk"})
-BOTH_ARMS = "both_arms"
-# Prioridade do árbitro (antes = mais prioritário); o combo suprime os membros.
-_PRIORITY: tuple[str, ...] = (BOTH_ARMS, "attack", "use", "jump", "crouch", "walk")
 
 DEFAULT_GESTURE_PARAMS: Mapping[str, GestureParams] = {
     "attack": DEFAULT_PUNCH_PARAMS,
@@ -63,22 +60,23 @@ def build_body_gestures(
 
 
 def build_arbiter(
-    names: Collection[str], config: ArbiterConfig | None = None
+    names: Collection[str], config: ArbiterConfig = DEFAULT_ARBITER
 ) -> tuple[GestureArbiter, ComboGesture | None]:
-    """Árbitro do Minecraft para os gestos presentes e o combo ``both_arms``, se couber.
+    """Árbitro dos gestos presentes, lido da ``config`` (seção ``arbiter`` do perfil, RF2).
 
-    - exclusivo ``{jump, crouch}`` (só vale se os dois existem);
-    - combo ``both_arms = {attack, use}``: só suprime os dois braços (nenhuma ação).
+    Nomes da config sem gesto montado são ignorados:
+
+    - a prioridade mantém só os gestos presentes (e os combos que se formam);
+    - cada grupo exclusivo vale pelos membros presentes, e só se restarem dois ou mais;
+    - um combo só existe se todos os seus membros estão presentes (``both_arms`` exige
+      ``attack`` e ``use``). O pipeline trata um combo por vez: mais de um é ``ValueError``.
     """
-    if config is not None:
-        raise NotImplementedError("spec 017 T2: árbitro a partir do ArbiterConfig")
-    present = set(names)
-    groups = [frozenset({"jump", "crouch"})] if {"jump", "crouch"} <= present else []
-    combo = (
-        ComboGesture(BOTH_ARMS, frozenset({"attack", "use"}))
-        if {"attack", "use"} <= present
-        else None
-    )
-    priority = [n for n in _PRIORITY if n in present or (n == BOTH_ARMS and combo is not None)]
-    combos = {BOTH_ARMS: combo.members} if combo is not None else None
-    return GestureArbiter(priority, groups, combos), combo
+    ranked = set(config.priority)
+    present = set(names) & ranked
+    formed = {n: m for n, m in config.combos.items() if n in ranked and m <= present}
+    if len(formed) > 1:
+        raise ValueError(f"arbiter: só um combo por perfil é suportado, recebido {sorted(formed)}")
+    combo = ComboGesture(*next(iter(formed.items()))) if formed else None
+    groups = [g & present for g in config.exclusive]
+    priority = [n for n in config.priority if n in present or n in formed]
+    return GestureArbiter(priority, [g for g in groups if len(g) >= 2], formed or None), combo

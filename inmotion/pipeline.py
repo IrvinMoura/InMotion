@@ -66,7 +66,9 @@ class Pipeline:
         self._pose_filter = pose_filter
         self._geometry = geometry if geometry is not None else GeometryConfig()
         self._baseline = BodyBaseline(baseline_params or BaselineParams())
-        self._arbiter, self._combo = build_arbiter([g.name for g in self._gestures])
+        self._arbiter, self._combo = build_arbiter(
+            [g.name for g in self._gestures], profile.arbiter
+        )
         self._mapper = ActionMapper(profile, safety.input, mapper_params or MapperParams())
         self._was_active = True  # gestos nascem zerados
         self._tracked_since: float | None = None  # início da sequência contínua de pose

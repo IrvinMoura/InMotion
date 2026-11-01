@@ -20,6 +20,7 @@ from inmotion.config.validate import ConfigError
 from inmotion.exit_zone import ExitZoneConfig
 from inmotion.filters.ema import EmaParams
 from inmotion.filters.one_euro import OneEuroParams
+from inmotion.gestures.arbiter import DEFAULT_ARBITER, ArbiterConfig
 from inmotion.gestures.base import GestureKind, GestureParams
 from inmotion.gestures.factory import DEFAULT_GESTURE_PARAMS
 from inmotion.gestures.features import BaselineParams
@@ -164,10 +165,15 @@ class Binding:
 
 @dataclass(frozen=True)
 class GameProfile:
-    """Perfil de jogo: para cada gesto, o input mapeado e o tipo (``config/games/*.yaml``)."""
+    """Perfil de jogo: para cada gesto, o input mapeado e o tipo (``config/games/*.yaml``).
+
+    ``arbiter`` (spec 017) define prioridade, grupos exclusivos e combos; sem a seção vale o
+    padrão anterior (``DEFAULT_ARBITER``).
+    """
 
     name: str
     bindings: dict[str, Binding]
+    arbiter: ArbiterConfig = DEFAULT_ARBITER
 
     def __post_init__(self) -> None:
         if not self.name:

@@ -209,14 +209,11 @@ MINECRAFT_ARBITER = ArbiterConfig(
     combos={"both_arms": frozenset({"attack", "use"})},
 )
 
-_XFAIL_T2 = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 017 T2")
-
 
 def _kinds(events: list[GestureEvent]) -> list[tuple[str, EventKind]]:
     return [(e.gesture, e.kind) for e in events]
 
 
-@_XFAIL_T2
 def test_crouch_beats_walk_and_walk_returns() -> None:
     """CA3: agachar e andar juntos liberam só ``crouch``; ao soltar, ``walk`` volta com START."""
     arbiter, _ = build_arbiter({"crouch", "walk"}, MINECRAFT_ARBITER)
@@ -227,7 +224,6 @@ def test_crouch_beats_walk_and_walk_returns() -> None:
     assert arbiter.granted == frozenset({"walk"})
 
 
-@_XFAIL_T2
 def test_walk_coexists_with_jump() -> None:
     """CA4: ``walk`` convive com ``jump`` e com ``strafe_left`` (fora dos grupos de ``crouch``)."""
     arbiter, _ = build_arbiter({"walk", "jump", "strafe_left"}, MINECRAFT_ARBITER)
