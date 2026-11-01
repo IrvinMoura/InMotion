@@ -151,6 +151,33 @@ def step_labels(schedule: Schedule) -> list[LabelInterval]:
     ]
 
 
+def step_count(
+    schedule: Schedule,
+    index: int,
+    presses: Sequence[tuple[float, KeyName]],
+    gesture_keys: Mapping[str, KeyName],
+) -> int | None:
+    """Quantas vezes a tecla do passo ``index`` já saiu desde o início dele (contador)."""
+    step = schedule.steps[index]
+    key = gesture_keys.get(step.gesture) if step.gesture else None
+    if key is None:
+        return None
+    start, _ = schedule.run_window(index)
+    return sum(1 for t, k in presses if k == key and t >= start)
+
+
+def gesture_totals(
+    presses: Sequence[tuple[float, KeyName]], gesture_keys: Mapping[str, KeyName]
+) -> dict[str, int]:
+    """Total de presses por gesto na sessão inteira (só gestos com tecla no perfil)."""
+    by_key = {key: name for name, key in gesture_keys.items()}
+    totals: dict[str, int] = {}
+    for _, key in presses:
+        if key in by_key:
+            totals[by_key[key]] = totals.get(by_key[key], 0) + 1
+    return totals
+
+
 def ascii_text(text: str) -> str:
     """A fonte Hershey do OpenCV só desenha ASCII: remove os acentos."""
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
@@ -190,11 +217,12 @@ def _bar(
     on: float,
     off: float,
     active: bool,
+    total: int = 0,
 ) -> None:
-    """Barra da feature com marcas de θ_on (vermelho) e θ_off (amarelo)."""
+    """Barra da feature com marcas de θ_on (vermelho) e θ_off (amarelo) e o total."""
     x0, x1 = img.shape[1] - _PANEL_W + 20, img.shape[1] - 20
     top = max(1.0, on * 1.5)
-    _text(img, name.upper(), (x0, y), 0.8, _GREEN if active else _WHITE, 2)
+    _text(img, f"{name.upper()} x{total}", (x0, y), 0.8, _GREEN if active else _WHITE, 2)
     val = "--" if value is None else f"{value:+.2f}"
     _text(img, val, (x1 - 95, y), 0.8, _WHITE, 2)
     by = y + 10
@@ -217,8 +245,14 @@ def render_frame(
     bars: Sequence[tuple[str, float | None, float, float, bool]],
     last_keys: Sequence[str],
     size: tuple[int, int] = CANVAS,
+    counter: tuple[int, int | None] | None = None,
+    totals: Mapping[str, int] | None = None,
 ) -> NDArray[np.uint8]:
-    """Tela da sessão: câmera à esquerda, barras à direita, instrução e timer grandes."""
+    """Tela da sessão: câmera à esquerda, barras à direita, instrução e timer grandes.
+
+    ``counter`` = (feitos, esperados) do passo atual, desenhado bem grande; ``totals``
+    mostra quantas vezes cada gesto já saiu na sessão, ao lado da barra dele.
+    """
     width, height = size
     canvas = np.zeros((height, width, 3), dtype=np.uint8)
     cam_w = width - _PANEL_W
@@ -231,8 +265,14 @@ def render_frame(
     _text(canvas, state_text, (cam_w - 290, height - 40), 1.4, state_color, 3)
     if last_keys:
         _text(canvas, "TECLA: " + " ".join(last_keys), (20, 130), 1.6, _GREEN, 4)
+    if counter is not None:
+        done, expected = counter
+        goal = "" if expected is None else f"/{expected}"
+        hit = expected is not None and done >= expected
+        _text(canvas, f"{done}{goal}", (cam_w - 330, 200), 4.0, _GREEN if hit else _WHITE, 8)
     for i, (name, value, on, off, active) in enumerate(bars):
-        _bar(canvas, 60 + i * 110, name, value, on, off, active)
+        total = 0 if totals is None else totals.get(name, 0)
+        _bar(canvas, 60 + i * 110, name, value, on, off, active, total)
     return canvas
 
 
@@ -269,6 +309,20 @@ class _LogBackend:
 
     def release(self, key: KeyName) -> None:
         pass
+
+
+def _counter(
+    schedule: Schedule,
+    index: int,
+    phase: Phase,
+    presses: Sequence[tuple[float, KeyName]],
+    keys: Mapping[str, KeyName],
+) -> tuple[int, int | None] | None:
+    """Contador do passo em execução (no aviso "PRÓXIMO" não há contador)."""
+    if phase is not Phase.RUN:
+        return None
+    done = step_count(schedule, index, presses, keys)
+    return None if done is None else (done, schedule.steps[index].expected)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -398,6 +452,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     state,
                     bars,
                     recent,
+                    counter=_counter(schedule, index, phase, backend.presses, keys),
+                    totals=gesture_totals(backend.presses, keys),
                 )
                 cv2.imshow(WINDOW_NAME, canvas)
                 if cv2.waitKey(1) & 0xFF == _ESC:

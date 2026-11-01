@@ -98,3 +98,26 @@ def test_render_frame_draws_big_canvas() -> None:
     assert out.shape == (720, 1280, 3)
     assert out.dtype == np.uint8
     assert out.any()
+
+
+def test_step_count_so_far_counts_only_current_step_key() -> None:
+    from tools.guided import step_count
+
+    sched = Schedule(STEPS, prep_s=2.0)
+    presses = [(3.0, "mouse_left"), (8.5, "mouse_left"), (9.0, "space"), (10.0, "mouse_left")]
+    assert step_count(sched, 1, presses, KEYS) == 2  # só mouse_left a partir de 8,0 s
+    assert step_count(sched, 0, presses, KEYS) is None  # passo "parado" não tem gesto
+
+
+def test_gesture_totals_count_presses_per_gesture() -> None:
+    from tools.guided import gesture_totals
+
+    presses = [(1.0, "mouse_left"), (2.0, "mouse_left"), (3.0, "space"), (4.0, "w")]
+    assert gesture_totals(presses, KEYS) == {"attack": 2, "jump": 1}
+
+
+def test_render_frame_shows_counter() -> None:
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    base = render_frame(frame, "3 PULOS", 3.0, Phase.RUN, "ATIVO", [], [])
+    with_counter = render_frame(frame, "3 PULOS", 3.0, Phase.RUN, "ATIVO", [], [], counter=(2, 3))
+    assert with_counter.sum() > base.sum()
