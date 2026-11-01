@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -24,6 +25,9 @@ _ARM: dict[Side, tuple[PoseLandmark, PoseLandmark, PoseLandmark]] = {
     Side.LEFT: (PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_ELBOW, PoseLandmark.LEFT_WRIST),
     Side.RIGHT: (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST),
 }
+if TYPE_CHECKING:
+    from inmotion.gestures.march import MarchState
+
 _HIPS = (PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP)
 _SHOULDERS = (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER)
 
@@ -119,6 +123,13 @@ class FrameContext:
     shoulder_y_px: float | None = None
     shoulder_width_px: float | None = None
     shoulder_baseline_px: float | None = None
+    # Spec 018: distância vertical joelho-quadril de cada lado (px) e sua base R7 (px).
+    knee_dist_left_px: float | None = None
+    knee_dist_right_px: float | None = None
+    knee_base_left_px: float | None = None
+    knee_base_right_px: float | None = None
+    # Estado da marcha do frame (preenchido pelo pipeline, uma vez por frame, antes dos gestos).
+    march: MarchState | None = None
 
 
 def _shoulder_line(pose: PoseFrame, geometry: GeometryConfig) -> tuple[float, float] | None:
@@ -146,6 +157,7 @@ def build_context(
     baseline: BodyBaseline,
     resting: bool,
     shoulder_baseline: BodyBaseline | None = None,
+    knee_baselines: tuple[BodyBaseline, BodyBaseline] | None = None,
 ) -> FrameContext:
     """Monta o contexto do frame: esqueleto normalizado (A6), ``s``, ``h`` e as bases R7.
 
@@ -264,3 +276,8 @@ def lean_forward(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
     if not (math.isfinite(dz) and math.isfinite(dy)) or (dz == 0.0 and dy == 0.0):
         return None
     return math.atan2(dz, dy)
+
+
+def knee_lift(ctx: FrameContext, side: Side) -> float | None:
+    """RF1 (018): ``k = d − (ȳ_joelho − ȳ_quadril)/s``; ≈ 0 parado, > 0 com o joelho erguido."""
+    raise NotImplementedError

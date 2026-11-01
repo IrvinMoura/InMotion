@@ -18,6 +18,7 @@ from inmotion.gestures.features import (
     crouch_drop,
     forward_reach,
     jump_height,
+    knee_lift,
     lean_forward,
 )
 from inmotion.types import PoseFrame
@@ -305,3 +306,60 @@ def test_rest_band_validation() -> None:
     for bad in (0.0, -1.0, float("nan")):
         with pytest.raises(ValueError, match="rest_band"):
             BaselineParams(rest_band=bad)
+
+
+# --- Spec 018: elevação do joelho (RF1, M1) ---
+
+NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 018 T1")
+
+
+def _knee_ctx(
+    lift_left: float = 0.0,
+    lift_right: float = 0.0,
+    *,
+    scale: float = 1.0,
+    dx: float = 0.0,
+    dy: float = 0.0,
+    hip_dy_after: float = 0.0,
+) -> FrameContext:
+    """15 frames de repouso (criam a base R7 dos joelhos) e um frame de teste."""
+    baselines = (BodyBaseline(BaselineParams()), BodyBaseline(BaselineParams()))
+    hip = BodyBaseline(BaselineParams())
+    ctx: FrameContext | None = None
+    for i in range(16):
+        last = i == 15
+        pose = make_body(
+            t=i / 30.0,
+            scale=scale,
+            hip_x_px=320.0 + dx,
+            hip_y_px=300.0 + dy + (hip_dy_after if last else 0.0),
+            knee_lift_left=lift_left if last else 0.0,
+            knee_lift_right=lift_right if last else 0.0,
+        )
+        ctx = build_context(pose, pose.t, GEOMETRY, hip, not last, None, knee_baselines=baselines)
+    assert ctx is not None
+    return ctx
+
+
+@NOT_YET
+@given(
+    lift=st.floats(0.3, 1.2),
+    scale=st.floats(0.5, 2.0),
+    dx=st.floats(-60.0, 60.0),
+    dy=st.floats(-60.0, 60.0),
+)
+def test_knee_lift_invariant_to_translation_and_scale(
+    lift: float, scale: float, dx: float, dy: float
+) -> None:
+    """M1: transladar ou escalar o esqueleto não muda `k` (vale a elevação sintética)."""
+    ctx = _knee_ctx(lift_left=lift, scale=scale, dx=dx, dy=dy)
+    assert knee_lift(ctx, Side.LEFT) == pytest.approx(lift, abs=1e-6)
+    assert knee_lift(ctx, Side.RIGHT) == pytest.approx(0.0, abs=1e-6)
+
+
+@NOT_YET
+def test_jump_keeps_knee_lift_near_zero() -> None:
+    """M1: no pulo o quadril e os joelhos sobem juntos: `k` fica ≈ 0 nos dois lados."""
+    ctx = _knee_ctx(hip_dy_after=-60.0)  # quadril 0,6 larguras de ombro acima da base
+    assert knee_lift(ctx, Side.LEFT) == pytest.approx(0.0, abs=1e-6)
+    assert knee_lift(ctx, Side.RIGHT) == pytest.approx(0.0, abs=1e-6)

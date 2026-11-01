@@ -26,6 +26,7 @@ HIP_WIDTH_M = 0.20
 TORSO_M = 0.60
 UPPER_ARM_M = 0.30
 FOREARM_M = 0.27
+THIGH_M = 0.45  # quadril -> joelho em pé (world, eixo y)
 SHOULDER_PX_AT_SCALE_1 = 100.0
 
 
@@ -62,6 +63,9 @@ def make_body(
     with_world: bool = True,
     hips_visible: bool = True,
     shoulder_dy_px: float = 0.0,
+    knee_lift_left: float = 0.0,
+    knee_lift_right: float = 0.0,
+    knees_visible: bool = True,
 ) -> PoseFrame:
     """Pose sintética de uma pessoa de frente para a câmera.
 
@@ -69,6 +73,9 @@ def make_body(
     ``lean`` (rad) inclina o tronco para frente: os ombros vão em direção à câmera (z < 0).
     ``hips_visible=False`` tira os quadris do quadro (visibilidade 0); ``shoulder_dy_px``
     desce os ombros na imagem (pixels, y cresce para baixo), como no agachar (spec 017).
+    Spec 018: ``knee_lift_left/right`` sobem o joelho do lado em larguras de ombro (``k`` da
+    RF1: com a base em repouso, ``k`` vale exatamente esse valor); ``knees_visible=False``
+    tira os joelhos do quadro (visibilidade 0).
     """
     world = np.zeros((N_LANDMARKS, 4), dtype=np.float64)
     world[:, 3] = visibility
@@ -88,6 +95,11 @@ def make_body(
         elbow = shoulder + UPPER_ARM_M * _unit(arm.upper)
         world[el, :3] = elbow
         world[wr, :3] = elbow + FOREARM_M * _unit(arm.fore)
+    for knee, hip_x, lift in (
+        (PoseLandmark.LEFT_KNEE, HIP_WIDTH_M / 2.0, knee_lift_left),
+        (PoseLandmark.RIGHT_KNEE, -HIP_WIDTH_M / 2.0, knee_lift_right),
+    ):
+        world[knee, :3] = (hip_x, THIGH_M - lift * SHOULDER_WIDTH_M, 0.0)
     # Pontos não usados ficam no quadril (já em 0); só importa o que os gestos leem.
     k = SHOULDER_PX_AT_SCALE_1 * scale / SHOULDER_WIDTH_M
     w_img, h_img = size
@@ -99,6 +111,11 @@ def make_body(
     lm[:, 4] = 1.0
     for shoulder in (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER):
         lm[shoulder, 1] += shoulder_dy_px / h_img
+    if not knees_visible:
+        for knee in (PoseLandmark.LEFT_KNEE, PoseLandmark.RIGHT_KNEE):
+            lm[knee, 3] = 0.0
+            if with_world:
+                world[knee, 3] = 0.0
     if not hips_visible:
         for hip in (PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP):
             lm[hip, 3] = 0.0
