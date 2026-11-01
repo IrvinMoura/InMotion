@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 
 from inmotion.app import AppDeps, run
-from inmotion.config.schema import Binding, GameProfile
+from inmotion.config.schema import AppConfig, Binding, CrouchConfig, GameProfile
 from inmotion.filters.pose_filter import PoseFilter
-from inmotion.gestures.base import GestureKind
+from inmotion.gestures.base import Direction, GestureKind, GestureParams
 from inmotion.safety import SafetyConfig
 from inmotion.types import FramePacket, PoseFrame
 from tests.fakes import (
@@ -355,3 +355,36 @@ def test_without_preprocess_estimator_gets_raw_frame() -> None:
     run(deps, NO_PERSISTENCE, max_frames=2)
 
     assert all(not img.any() for img in estimator.images)
+
+
+def _crouch_poses(*, shoulders_drop: bool) -> list[PoseFrame]:
+    """20 quadros em pé e 15 agachados: descem só os ombros ou só o quadril."""
+    standing = [make_body(t=i * DT) for i in range(BASE_FRAMES)]
+    drop = {"shoulder_dy_px": 120.0} if shoulders_drop else {"hip_y_px": 340.0}
+    crouched = [make_body(t=(BASE_FRAMES + i) * DT, **drop) for i in range(15)]  # type: ignore[arg-type]
+    return standing + crouched
+
+
+def _run_crouch(poses: list[PoseFrame], config: AppConfig) -> FakeInputBackend:
+    clock = FakeClock()
+    backend = FakeInputBackend()
+    deps = make_deps(clock, ClockedSource(clock, len(poses)), FakePoseEstimator(poses), backend)
+    deps.config = config
+    run(deps, NO_PERSISTENCE, max_frames=len(poses))
+    return backend
+
+
+def test_crouch_feature_from_config_selects_the_signal() -> None:
+    """Spec 017 RF3: ``crouch.feature`` chega à fábrica (ombros por padrão; ``hip`` opcional)."""
+    shoulders = _run_crouch(_crouch_poses(shoulders_drop=True), AppConfig())
+    assert ("press", "shift") in shoulders.events
+    assert shoulders.pressed == set()
+
+    hip_gestures = {**AppConfig().gestures, "crouch": GestureParams(0.35, 0.25, Direction.ABOVE)}
+    hip_config = AppConfig(crouch=CrouchConfig("hip"), gestures=hip_gestures)
+    by_hip = _run_crouch(_crouch_poses(shoulders_drop=False), hip_config)
+    assert ("press", "shift") in by_hip.events
+    # Com o padrão (ombros), descer só o quadril não agacha.
+    assert ("press", "shift") not in _run_crouch(
+        _crouch_poses(shoulders_drop=False), AppConfig()
+    ).events

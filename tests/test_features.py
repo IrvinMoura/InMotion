@@ -190,15 +190,12 @@ def test_lean_forward_none_cases() -> None:
 
 # --- Spec 017: crouch_drop (agachar pelos ombros) ---------------------------------------------
 
-_T1_STUB = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 017 T5")
-
 
 def _shoulder_ctx(pose: PoseFrame, sbase: BodyBaseline, resting: bool = True) -> FrameContext:
     hip_base = BodyBaseline(BaselineParams(init_frames=1))
     return build_context(pose, pose.t, GEOMETRY, hip_base, resting, shoulder_baseline=sbase)
 
 
-@_T1_STUB
 @given(
     k=st.floats(min_value=0.5, max_value=3.0),
     drop=st.floats(min_value=-0.5, max_value=2.0),
@@ -218,7 +215,6 @@ def test_crouch_drop_invariant_to_translation_and_scale(
     assert c == pytest.approx(drop, abs=1e-6)
 
 
-@_T1_STUB
 def test_crouch_drop_zero_at_baseline() -> None:
     """CA5: na base, ``c ≈ 0``; sem base (menos de K amostras) é ``None``."""
     sbase = BodyBaseline(BaselineParams(init_frames=2))

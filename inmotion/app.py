@@ -151,6 +151,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
         Side.RIGHT if config.handedness == "right" else Side.LEFT,
         config.gestures,
         config.geometry,
+        config.crouch.feature,
     )
     pipeline = Pipeline(
         safety,

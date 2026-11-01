@@ -446,3 +446,12 @@ def test_arbiter_wrong_types_are_config_errors() -> None:
     with pytest.raises(ConfigError) as exc:
         _arbiter_profile({"prioridade": ["jump"]})
     assert exc.value.path == "arbiter.prioridade"
+
+
+def test_crouch_feature_is_validated() -> None:
+    """Spec 017 RF3: ``crouch.feature`` é ``shoulders`` (padrão) ou ``hip``."""
+    assert build(AppConfig, {}).crouch.feature == "shoulders"
+    assert build(AppConfig, {"crouch": {"feature": "hip"}}).crouch.feature == "hip"
+    with pytest.raises(ConfigError) as exc:
+        build(AppConfig, {"crouch": {"feature": "joelho"}})
+    assert exc.value.path == "crouch.feature"

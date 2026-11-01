@@ -212,8 +212,18 @@ def crouch_depth(ctx: FrameContext) -> float | None:
 
 
 def crouch_drop(ctx: FrameContext) -> float | None:
-    """RF3: ``c = (ȳ_ombros − b_o)/s``; positivo quando os ombros descem abaixo da base."""
-    raise NotImplementedError("spec 017 T5: crouch_drop")
+    """RF3: ``c = (ȳ_ombros − b_o)/s``, adimensional; positivo quando os ombros descem.
+
+    ``ȳ_ombros = (y₁₁ + y₁₂)/2`` e ``s = ‖p₁₁ − p₁₂‖`` são medidos em pixels (A6, a mesma
+    escala do esqueleto, mas sem exigir os quadris) e ``b_o`` é a base R7 dessa altura.
+    Invariante a translação e escala: ``ȳ`` e ``b_o`` são ordenadas na mesma imagem, então
+    uma translação vertical ``d`` cancela em ``ȳ − b_o`` e uma escala ``k`` multiplica
+    numerador e denominador. Vale ≈ 0 na base. ``None`` sem ombros válidos ou sem base.
+    """
+    y, base, s = ctx.shoulder_y_px, ctx.shoulder_baseline_px, ctx.shoulder_width_px
+    if y is None or base is None or s is None:
+        return None
+    return (y - base) / s
 
 
 def lean_forward(pose: PoseFrame, geometry: GeometryConfig) -> float | None:

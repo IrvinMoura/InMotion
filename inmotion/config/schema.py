@@ -22,6 +22,7 @@ from inmotion.filters.ema import EmaParams
 from inmotion.filters.one_euro import OneEuroParams
 from inmotion.gestures.arbiter import DEFAULT_ARBITER, ArbiterConfig
 from inmotion.gestures.base import GestureKind, GestureParams
+from inmotion.gestures.crouch import CrouchFeature
 from inmotion.gestures.factory import DEFAULT_GESTURE_PARAMS
 from inmotion.gestures.features import BaselineParams
 from inmotion.input.backend import KeyName
@@ -133,6 +134,17 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class CrouchConfig:
+    """Sinal do agachar (spec 017 RF3): ``shoulders`` (padrão) ou ``hip`` (spec 008).
+
+    Os limiares de ``gestures.crouch`` valem para o sinal escolhido: trocar a feature exige
+    trocar também ``theta_on`` e ``theta_off``.
+    """
+
+    feature: CrouchFeature = "shoulders"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """Configuração completa do aplicativo (``config/default.yaml`` ← jogo ← perfil ← CLI)."""
 
@@ -142,6 +154,7 @@ class AppConfig:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     filters: FilterConfig = field(default_factory=FilterConfig)
     gestures: dict[str, GestureParams] = field(default_factory=lambda: dict(DEFAULT_GESTURE_PARAMS))
+    crouch: CrouchConfig = field(default_factory=CrouchConfig)
     baseline: BaselineParams = field(default_factory=BaselineParams)
     mapper: MapperParams = field(default_factory=MapperParams)
     geometry: GeometryConfig = field(default_factory=GeometryConfig)

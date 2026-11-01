@@ -13,7 +13,7 @@ from inmotion.gestures.arbiter import DEFAULT_ARBITER, ArbiterConfig, GestureArb
 from inmotion.gestures.base import GestureParams
 from inmotion.gestures.body import FeatureGesture
 from inmotion.gestures.combo import ComboGesture
-from inmotion.gestures.crouch import DEFAULT_CROUCH_PARAMS, crouch_gesture
+from inmotion.gestures.crouch import DEFAULT_CROUCH_PARAMS, CrouchFeature, crouch_gesture
 from inmotion.gestures.jump import DEFAULT_JUMP_PARAMS, jump_gesture
 from inmotion.gestures.lean import DEFAULT_LEAN_PARAMS, lean_gesture
 from inmotion.gestures.punch import DEFAULT_PUNCH_PARAMS, opposite, punch_gesture
@@ -36,11 +36,12 @@ def build_body_gestures(
     handedness: Side = Side.RIGHT,
     params: Mapping[str, GestureParams] | None = None,
     geometry: GeometryConfig | None = None,
+    crouch_feature: CrouchFeature = "shoulders",
 ) -> list[FeatureGesture]:
     """Gestos de corpo para os ``names`` do perfil, na ordem de prioridade.
 
     O braço dominante (``handedness``) ataca e o outro usa item (CA2). ``params`` sobrescreve
-    os padrões por nome.
+    os padrões por nome; ``crouch_feature`` escolhe o sinal do agachar (ombros ou quadril).
     """
     geometry = geometry if geometry is not None else GeometryConfig()
     merged = {**DEFAULT_GESTURE_PARAMS, **(params or {})}
@@ -53,7 +54,7 @@ def build_body_gestures(
     if "jump" in wanted:
         gestures.append(jump_gesture(merged["jump"]))
     if "crouch" in wanted:
-        gestures.append(crouch_gesture(merged["crouch"]))
+        gestures.append(crouch_gesture(merged["crouch"], crouch_feature))
     if "walk" in wanted:
         gestures.append(lean_gesture(merged["walk"], geometry))
     return gestures

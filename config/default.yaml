@@ -39,18 +39,26 @@ filters:
 # Valores INICIAIS, a refinar com dados de gravação (specs 010/011); nunca mude "no olho".
 #   attack/use: alcance frontal r = (z_ombro - z_pulso)/(comprimento do braço), |r| <= 1 (A7/A8)
 #   jump:       (base - h)/s, em larguras de ombro (J1); trigger
-#   crouch:     (h - base)/s, em larguras de ombro
+#   crouch:     c = (ȳ_ombros - base_ombros)/s, em larguras de ombro (crouch.feature abaixo)
 #   walk:       inclinação do tronco para frente, em rad (A9)
 # direction: above ativa com f > theta_on e solta com f < theta_off (theta_on > theta_off).
 gestures:
   attack: {theta_on: 0.70, theta_off: 0.55, direction: above, debounce_frames: 3, cooldown_s: 0.0}
   use:    {theta_on: 0.70, theta_off: 0.55, direction: above, debounce_frames: 3, cooldown_s: 0.0}
   jump:   {theta_on: 0.25, theta_off: 0.15, direction: above, debounce_frames: 2, cooldown_s: 0.0}
-  crouch: {theta_on: 0.35, theta_off: 0.25, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  # crouch: limiar PROVISÓRIO (spec 017): agachadinha do pulo máx 0,66, inclinar máx 0,22,
+  # agachar mediana >= 1,18 (sessões guiadas de 01/11/2026); recalibrar na spec 017 T7.
+  # Com crouch.feature: hip os valores antigos eram theta_on 0.35 e theta_off 0.25.
+  crouch: {theta_on: 1.0,  theta_off: 0.7,  direction: above, debounce_frames: 4, cooldown_s: 0.0}
   walk:   {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
 
-# Base adaptativa R7 da altura do quadril (pulo e agachar): média dos primeiros init_frames
-# frames de repouso e depois EMA lenta de taxa rate, só em repouso.
+# Sinal do agachar (spec 017 RF3): shoulders = queda dos ombros (continua visível sem o
+# quadril); hip = (h - base)/s, do quadril (spec 008). Ao trocar, ajuste gestures.crouch.
+crouch:
+  feature: shoulders
+
+# Base adaptativa R7 da altura do quadril (pulo) e dos ombros (agachar): média dos primeiros
+# init_frames frames de repouso e depois EMA lenta de taxa rate, só em repouso.
 baseline:
   init_frames: 15
   rate: 0.02

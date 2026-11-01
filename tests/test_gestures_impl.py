@@ -32,7 +32,8 @@ DT = 1.0 / 30.0
 
 PUNCH = GestureParams(0.70, 0.55, Direction.ABOVE, debounce_frames=3)
 JUMP = GestureParams(0.25, 0.15, Direction.ABOVE, debounce_frames=2)
-CROUCH = GestureParams(0.35, 0.25, Direction.ABOVE, debounce_frames=4)
+CROUCH = GestureParams(0.35, 0.25, Direction.ABOVE, debounce_frames=4)  # feature "hip"
+SHOULDER_CROUCH = GestureParams(1.0, 0.7, Direction.ABOVE, debounce_frames=4)
 LEAN = GestureParams(0.30, 0.20, Direction.ABOVE, debounce_frames=4)
 
 
@@ -42,10 +43,12 @@ class Rig:
     def __init__(self, gestures: Sequence[BodyGesture]) -> None:
         self.gestures = list(gestures)
         self.baseline = BodyBaseline(BaselineParams())
+        self.shoulder_baseline = BodyBaseline(BaselineParams())
         self.events: list[GestureEvent] = []
 
     def step(self, pose: PoseFrame) -> None:
-        ctx = build_context(pose, pose.t, GEOMETRY, self.baseline, all_idle(self.gestures))
+        resting = all_idle(self.gestures)
+        ctx = build_context(pose, pose.t, GEOMETRY, self.baseline, resting, self.shoulder_baseline)
         for g in self.gestures:
             ev = g.update(ctx)
             if ev is not None:
@@ -206,7 +209,7 @@ def _crouch_run(rig: Rig, depth_px: dict[range, float], n: int) -> None:
 
 def test_crouch_holds_shift_until_standing() -> None:
     """CA5: agachar 2 s -> um START (shift pressionado) e um END ao levantar."""
-    rig = Rig([crouch_gesture(CROUCH)])
+    rig = Rig([crouch_gesture(CROUCH, "hip")])
     _crouch_run(rig, {range(60, 120): 40.0}, 180)
     assert rig.kinds("crouch") == [EventKind.START, EventKind.END]
     start, end = (e for e in rig.events if e.gesture == "crouch")
@@ -216,21 +219,21 @@ def test_crouch_holds_shift_until_standing() -> None:
 
 def test_crouch_hysteresis_keeps_between_thresholds() -> None:
     """Entre θ_off (0,25) e θ_on (0,35) o agachar já ativo não solta."""
-    rig = Rig([crouch_gesture(CROUCH)])
+    rig = Rig([crouch_gesture(CROUCH, "hip")])
     _crouch_run(rig, {range(30, 60): 40.0, range(60, 90): 30.0}, 120)
     assert rig.kinds("crouch") == [EventKind.START, EventKind.END]
     assert rig.events[-1].t == pytest.approx(90 * DT)
 
 
 def test_shallow_dip_does_not_crouch() -> None:
-    rig = Rig([crouch_gesture(CROUCH)])
+    rig = Rig([crouch_gesture(CROUCH, "hip")])
     _crouch_run(rig, {range(30, 90): 30.0}, 120)
     assert rig.events == []
 
 
 def test_long_crouch_does_not_move_baseline() -> None:
     """Risco do plano: agachado por muito tempo, a base R7 fica congelada."""
-    rig = Rig([crouch_gesture(CROUCH), jump_gesture(JUMP)])
+    rig = Rig([crouch_gesture(CROUCH, "hip"), jump_gesture(JUMP)])
     _crouch_run(rig, {range(30, 30 + 20 * 30): 40.0}, 30 + 20 * 30)
     assert rig.baseline.value is not None
     assert abs(rig.baseline.value - 300.0) < 2.0
@@ -322,3 +325,59 @@ def test_lean_sign_on_hardware(capsys: pytest.CaptureFixture[str]) -> None:
         print(f"lean em pé (média) = {base:.3f} rad; inclinado (máx) = {max(leaning):.3f} rad")
     assert max(leaning) > 0.0
     assert max(leaning) - base > 0.10
+
+
+def _shoulder_run(
+    rig: Rig, dip_px: dict[range, float], n: int, *, hips_visible_in_dip: bool = False
+) -> None:
+    """Quadril parado em 300 px; nos intervalos dados os ombros descem ``dip_px`` (s = 100 px)."""
+    for i in range(n):
+        dip = next((d for r, d in dip_px.items() if i in r), 0.0)
+        visible = hips_visible_in_dip or dip == 0.0
+        rig.step(make_body(t=i * DT, shoulder_dy_px=dip, hips_visible=visible))
+
+
+def test_crouch_shoulder_feature_activates() -> None:
+    """RF3: ombros 1,2 s abaixo da base ativam o agachar mesmo com o quadril fora do quadro."""
+    rig = Rig([crouch_gesture(SHOULDER_CROUCH, "shoulders")])
+    _shoulder_run(rig, {range(60, 120): 120.0}, 180)
+    assert rig.kinds("crouch") == [EventKind.START, EventKind.END]
+    start, end = (e for e in rig.events if e.gesture == "crouch")
+    assert 60 * DT < start.t <= 64 * DT  # START após N = 4 frames
+    assert end.t == pytest.approx(120 * DT)  # solta ao levantar
+
+
+def test_crouch_shoulder_feature_is_the_default() -> None:
+    rig = Rig([crouch_gesture(SHOULDER_CROUCH)])
+    _shoulder_run(rig, {range(60, 120): 120.0}, 180, hips_visible_in_dip=True)
+    assert rig.kinds("crouch") == [EventKind.START, EventKind.END]
+
+
+def test_small_shoulder_dip_does_not_crouch() -> None:
+    """RF3b: a agachadinha antes do pulo (c máx 0,66 medido) fica abaixo de θ_on = 1,0."""
+    rig = Rig([crouch_gesture(SHOULDER_CROUCH, "shoulders")])
+    _shoulder_run(rig, {range(30, 90): 66.0}, 120, hips_visible_in_dip=True)
+    assert rig.events == []
+
+
+def test_shoulder_crouch_hysteresis_keeps_between_thresholds() -> None:
+    """Entre θ_off (0,7) e θ_on (1,0) o agachar já ativo não solta."""
+    rig = Rig([crouch_gesture(SHOULDER_CROUCH, "shoulders")])
+    _shoulder_run(rig, {range(30, 60): 120.0, range(60, 90): 85.0}, 120, hips_visible_in_dip=True)
+    assert rig.kinds("crouch") == [EventKind.START, EventKind.END]
+    assert rig.events[-1].t == pytest.approx(90 * DT)
+
+
+def test_crouch_hip_feature_still_selectable() -> None:
+    """RF3: ``feature="hip"`` mantém o ``(h − b)/s`` antigo; ombros parados não ativam."""
+    rig = Rig([crouch_gesture(CROUCH, "hip")])
+    _crouch_run(rig, {range(60, 120): 40.0}, 180)
+    assert rig.kinds("crouch") == [EventKind.START, EventKind.END]
+    shoulders_only = Rig([crouch_gesture(CROUCH, "hip")])
+    _shoulder_run(shoulders_only, {range(30, 90): 120.0}, 120, hips_visible_in_dip=True)
+    assert shoulders_only.events == []
+
+
+def test_crouch_gesture_rejects_unknown_feature() -> None:
+    with pytest.raises(ValueError, match="feature"):
+        crouch_gesture(SHOULDER_CROUCH, "joelho")  # type: ignore[arg-type]
