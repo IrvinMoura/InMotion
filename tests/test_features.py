@@ -310,8 +310,6 @@ def test_rest_band_validation() -> None:
 
 # --- Spec 018: elevação do joelho (RF1, M1) ---
 
-NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 018 T1")
-
 
 def _knee_ctx(
     lift_left: float = 0.0,
@@ -341,7 +339,6 @@ def _knee_ctx(
     return ctx
 
 
-@NOT_YET
 @given(
     lift=st.floats(0.3, 1.2),
     scale=st.floats(0.5, 2.0),
@@ -357,9 +354,36 @@ def test_knee_lift_invariant_to_translation_and_scale(
     assert knee_lift(ctx, Side.RIGHT) == pytest.approx(0.0, abs=1e-6)
 
 
-@NOT_YET
 def test_jump_keeps_knee_lift_near_zero() -> None:
     """M1: no pulo o quadril e os joelhos sobem juntos: `k` fica ≈ 0 nos dois lados."""
     ctx = _knee_ctx(hip_dy_after=-60.0)  # quadril 0,6 larguras de ombro acima da base
     assert knee_lift(ctx, Side.LEFT) == pytest.approx(0.0, abs=1e-6)
     assert knee_lift(ctx, Side.RIGHT) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_knee_lift_none_without_knee() -> None:
+    """RF1: sem o joelho visível (ou sem base ainda) `k` é None, sem inventar zero."""
+    baselines = (BodyBaseline(BaselineParams()), BodyBaseline(BaselineParams()))
+    hip = BodyBaseline(BaselineParams())
+    pose = make_body(t=0.0, knees_visible=False)
+    ctx = build_context(pose, 0.0, GEOMETRY, hip, True, None, knee_baselines=baselines)
+    assert knee_lift(ctx, Side.LEFT) is None
+    assert knee_lift(ctx, Side.RIGHT) is None
+    ctx = build_context(make_body(t=0.0), 0.0, GEOMETRY, hip, True, None, knee_baselines=baselines)
+    assert knee_lift(ctx, Side.LEFT) is None  # base R7 ainda sem K amostras
+    for i in range(15):
+        ctx = build_context(make_body(t=i / 30), i / 30, GEOMETRY, hip, True, None, None)
+    assert knee_lift(ctx, Side.LEFT) is None  # sem bases de joelho no contexto
+
+
+def test_raised_knee_does_not_move_its_baseline() -> None:
+    """Portão de desvio: o joelho erguido (|k| >= rest_band) não contamina a base R7."""
+    baselines = (BodyBaseline(BaselineParams()), BodyBaseline(BaselineParams()))
+    hip = BodyBaseline(BaselineParams())
+    for i in range(15):
+        build_context(make_body(t=i / 30), i / 30, GEOMETRY, hip, True, None, baselines)
+    before = baselines[0].value
+    for i in range(15, 200):
+        pose = make_body(t=i / 30, knee_lift_left=0.8)
+        build_context(pose, i / 30, GEOMETRY, hip, True, None, baselines)
+    assert baselines[0].value == before

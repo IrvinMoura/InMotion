@@ -30,6 +30,10 @@ if TYPE_CHECKING:
 
 _HIPS = (PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP)
 _SHOULDERS = (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER)
+_LEG: dict[Side, tuple[PoseLandmark, PoseLandmark]] = {
+    Side.LEFT: (PoseLandmark.LEFT_HIP, PoseLandmark.LEFT_KNEE),
+    Side.RIGHT: (PoseLandmark.RIGHT_HIP, PoseLandmark.RIGHT_KNEE),
+}
 
 
 @dataclass(frozen=True)
@@ -150,6 +154,20 @@ def _shoulder_line(pose: PoseFrame, geometry: GeometryConfig) -> tuple[float, fl
     return y, s
 
 
+def _knee_distance(pose: PoseFrame, side: Side, geometry: GeometryConfig) -> float | None:
+    """RF1 (018): ``ȳ_joelho − ȳ_quadril`` do lado, em pixels (positivo com o joelho abaixo).
+
+    ``None`` se o joelho ou o quadril do lado estão abaixo do limiar de visibilidade ou se o
+    valor não é finito.
+    """
+    hip, knee = _LEG[side]
+    if not is_visible(pose, (hip, knee), geometry.visibility_threshold):
+        return None
+    px = pose.pixels()
+    d = float(px[knee, 1] - px[hip, 1])
+    return d if math.isfinite(d) else None
+
+
 def build_context(
     pose: PoseFrame,
     t: float,
@@ -170,6 +188,10 @@ def build_context(
     ``shoulder_width_px``), **sem exigir os quadris**, e uma segunda base R7
     (``shoulder_baseline``, opcional) acompanha ``ȳ_ombros`` com a mesma regra de repouso:
     só anda com ``resting`` e ombros válidos, e fica congelada fora disso.
+
+    Spec 018: com ``knee_baselines`` (esquerda, direita) mede a distância joelho-quadril de
+    cada lado (px) e mantém a base R7 de cada uma, com a mesma regra de repouso e o portão de
+    desvio ``rest_band`` (um joelho erguido não contamina a base). Exige o esqueleto (``s``).
     """
     shoulders = _shoulder_line(pose, geometry)
     shoulder_y, shoulder_w = shoulders if shoulders is not None else (None, None)
@@ -181,15 +203,53 @@ def build_context(
             else shoulder_baseline.value
         )
     skeleton = normalize_skeleton(pose, geometry)
+    knee_base: tuple[float | None, float | None] = (None, None)
+    if knee_baselines is not None:
+        knee_base = (knee_baselines[0].value, knee_baselines[1].value)
     if skeleton is None:
         return FrameContext(
-            t, pose, None, None, None, baseline.value, shoulder_y, shoulder_w, shoulder_base
+            t,
+            pose,
+            None,
+            None,
+            None,
+            baseline.value,
+            shoulder_y,
+            shoulder_w,
+            shoulder_base,
+            knee_base_left_px=knee_base[0],
+            knee_base_right_px=knee_base[1],
         )
     px = pose.pixels()
     hip_y = float((px[_HIPS[0], 1] + px[_HIPS[1], 1]) / 2.0)
     base = baseline.update(hip_y, resting, skeleton.shoulder_px)
+    dist_left = dist_right = None
+    if knee_baselines is not None:
+        dist_left = _knee_distance(pose, Side.LEFT, geometry)
+        dist_right = _knee_distance(pose, Side.RIGHT, geometry)
+        scale = skeleton.shoulder_px
+        knee_base = (
+            knee_baselines[0].update(dist_left, resting, scale)
+            if dist_left is not None
+            else knee_baselines[0].value,
+            knee_baselines[1].update(dist_right, resting, scale)
+            if dist_right is not None
+            else knee_baselines[1].value,
+        )
     return FrameContext(
-        t, pose, skeleton, skeleton.shoulder_px, hip_y, base, shoulder_y, shoulder_w, shoulder_base
+        t,
+        pose,
+        skeleton,
+        skeleton.shoulder_px,
+        hip_y,
+        base,
+        shoulder_y,
+        shoulder_w,
+        shoulder_base,
+        dist_left,
+        dist_right,
+        knee_base[0],
+        knee_base[1],
     )
 
 
@@ -279,5 +339,18 @@ def lean_forward(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
 
 
 def knee_lift(ctx: FrameContext, side: Side) -> float | None:
-    """RF1 (018): ``k = d − (ȳ_joelho − ȳ_quadril)/s``; ≈ 0 parado, > 0 com o joelho erguido."""
-    raise NotImplementedError
+    """RF1 (018): ``k = (d − x)/s`` com ``x = ȳ_joelho − ȳ_quadril`` do lado (px).
+
+    ``d`` é a base R7 de ``x`` em repouso e ``s`` a largura dos ombros (A6); equivale a
+    ``k = d/s − x/s``, adimensional. ``k ≈ 0`` parado e ``k > 0`` com o joelho erguido
+    (``x`` diminui). Invariante a translação e escala: ``x`` é uma diferença de ordenadas na
+    mesma imagem (a translação cancela) e ``d``, ``x`` e ``s`` escalam juntos. No pulo o
+    quadril e os joelhos sobem juntos, então ``x`` não muda e ``k ≈ 0`` (M1).
+    ``None`` sem esqueleto, sem base ou sem o joelho/quadril do lado visíveis.
+    """
+    x = ctx.knee_dist_left_px if side is Side.LEFT else ctx.knee_dist_right_px
+    base = ctx.knee_base_left_px if side is Side.LEFT else ctx.knee_base_right_px
+    s = ctx.shoulder_px
+    if x is None or base is None or s is None:
+        return None
+    return (base - x) / s
