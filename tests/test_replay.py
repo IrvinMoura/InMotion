@@ -191,8 +191,11 @@ CROUCH_FIXTURES = ("crouch_2m.npz", "crouch_1m5.npz")
 LATENCY_S = 0.6  # tolerância: tecla logo após o fim do passo ainda é dele
 
 
-def _replay_like_app(name: str, rest_band: float | None = None) -> tuple[Recording, list]:
-    """Replay com a mesma montagem do app (config, perfil, filtro One Euro)."""
+def _replay_like_app(
+    name: str, rest_band: float | None = None, overrides: tuple[str, ...] = ()
+) -> tuple[Recording, list]:
+    """Replay com a mesma montagem do app (config, perfil, filtro One Euro); ``overrides``
+    são sobrescritas no formato do ``--set``."""
     from dataclasses import replace
 
     from inmotion.app import pose_filter_from_config
@@ -201,7 +204,7 @@ def _replay_like_app(name: str, rest_band: float | None = None) -> tuple[Recordi
     from inmotion.vision.landmarks import Side
 
     rec = load_recording(FIXTURES / name)
-    config, profile = load_config(game="minecraft")
+    config, profile = load_config(game="minecraft", overrides=overrides)
     assert profile is not None
     baseline = (
         config.baseline if rest_band is None else replace(config.baseline, rest_band=rest_band)
@@ -262,3 +265,39 @@ def test_without_baseline_gate_standing_up_jumps() -> None:
     """Controle: sem o portão de desvio da base, levantar do agachar gera `space`."""
     rec, presses = _replay_like_app("crouch_2m.npz", rest_band=1e6)
     assert "space" in _presses_in(rec, "crouch", presses)
+
+
+# --- Spec 018 T7: sessões de marcha reais como regressão ---
+# Recortes de recordings/guided_p1_20261101-040215 (2 m) e -040417 (1,5 m), sem os world
+# landmarks (a marcha, o pulo e o agachar usam só a imagem) para caber em 1 MB. Roteiro:
+# parado, marcha lenta, parado, marcha rápida, parado, 3 pulos.
+
+MARCH_FIXTURES = ("march_2m.npz", "march_1m5.npz")
+
+
+@pytest.mark.parametrize("name", MARCH_FIXTURES)
+def test_march_walks_and_sprints(name: str) -> None:
+    """CA7: marcha lenta → `w` sem `ctrl`; rápida → `w` + `ctrl`; nenhum pulo na marcha."""
+    rec, presses = _replay_like_app(name)
+    slow = _presses_in(rec, "march_slow", presses)
+    fast = _presses_in(rec, "march_fast", presses)
+    assert "w" in slow
+    assert "ctrl" not in slow
+    assert "w" in fast
+    assert "ctrl" in fast
+    assert "space" not in slow + fast  # RF6b: o quique do quadril não vira pulo
+
+
+@pytest.mark.parametrize("name", MARCH_FIXTURES)
+def test_no_walk_when_still_or_jumping(name: str) -> None:
+    """CA7: parado e pulando não andam; os 3 pulos reais continuam saindo."""
+    rec, presses = _replay_like_app(name)
+    for label in ("rest", "rest_mid", "rest_mid2"):
+        assert _presses_in(rec, label, presses) == []
+    assert _presses_in(rec, "jump", presses) == ["space", "space", "space"]
+
+
+def test_without_jump_gate_memory_fast_march_jumps() -> None:
+    """Controle: sem a memória do portão do pulo, a marcha rápida a 1,5 m gera `space`."""
+    rec, presses = _replay_like_app("march_1m5.npz", overrides=("march.jump_gate_hold_s=0",))
+    assert "space" in _presses_in(rec, "march_fast", presses)
