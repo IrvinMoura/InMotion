@@ -165,6 +165,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
         config.gestures,
         config.geometry,
         config.crouch.feature,
+        config.march,
     )
     pipeline = Pipeline(
         safety,

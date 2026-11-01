@@ -452,7 +452,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     backend = _LogBackend()
     safety = SafetyManager(TrackedInput(backend, config.safety.always_release), config.safety)
     gestures = build_body_gestures(
-        profile.bindings, Side(config.handedness), config.gestures, config.geometry
+        profile.bindings,
+        Side(config.handedness),
+        config.gestures,
+        config.geometry,
+        config.crouch.feature,
+        config.march,
     )
     pipeline = Pipeline(
         safety,

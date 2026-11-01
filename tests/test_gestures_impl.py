@@ -44,11 +44,20 @@ class Rig:
         self.gestures = list(gestures)
         self.baseline = BodyBaseline(BaselineParams())
         self.shoulder_baseline = BodyBaseline(BaselineParams())
+        self.knee_baselines = (BodyBaseline(BaselineParams()), BodyBaseline(BaselineParams()))
         self.events: list[GestureEvent] = []
 
     def step(self, pose: PoseFrame) -> None:
         resting = all_idle(self.gestures)
-        ctx = build_context(pose, pose.t, GEOMETRY, self.baseline, resting, self.shoulder_baseline)
+        ctx = build_context(
+            pose,
+            pose.t,
+            GEOMETRY,
+            self.baseline,
+            resting,
+            self.shoulder_baseline,
+            self.knee_baselines,
+        )
         for g in self.gestures:
             ev = g.update(ctx)
             if ev is not None:
@@ -118,6 +127,42 @@ def test_feature_gesture_close_reset_and_value() -> None:
 def _run_hip(rig: Rig, hip_y: NDArray[np.float64]) -> None:
     for i, y in enumerate(hip_y):
         rig.step(make_body(t=i * DT, hip_y_px=float(y), right_arm=ARM_HANGING))
+
+
+def _knee_jump_run(rig: Rig, knee_lift: float) -> None:
+    """Repouso, depois o quadril sobe 50 px (j = 0,5 > θ_on) por 0,4 s, com o joelho esquerdo
+    erguido em ``knee_lift`` larguras de ombro durante a subida."""
+    for i in range(120):
+        up = 60 <= i < 72
+        rig.step(
+            make_body(
+                t=i * DT,
+                hip_y_px=250.0 if up else 300.0,
+                knee_lift_left=knee_lift if up else 0.0,
+            )
+        )
+
+
+def test_jump_gated_while_knee_lifted() -> None:
+    """RF6b: o quique da marcha (quadril sobe com um joelho erguido, k > θ_on do passo) não
+    dispara pulo."""
+    rig = Rig([jump_gesture(JUMP, knee_gate=0.30)])
+    _knee_jump_run(rig, 0.8)
+    assert rig.kinds("jump") == []
+
+
+def test_real_jump_with_knees_down_still_pulses() -> None:
+    """RF6b: o pulo real (joelhos baixos, k <= 0,14) continua gerando um PULSE."""
+    rig = Rig([jump_gesture(JUMP, knee_gate=0.30)])
+    _knee_jump_run(rig, 0.14)
+    assert rig.kinds("jump") == [EventKind.PULSE]
+
+
+def test_jump_without_gate_ignores_knees() -> None:
+    """Sem `knee_gate` o gesto é o da spec 008 (compatível)."""
+    rig = Rig([jump_gesture(JUMP)])
+    _knee_jump_run(rig, 0.8)
+    assert rig.kinds("jump") == [EventKind.PULSE]
 
 
 def test_jump_single_pulse_and_still_none() -> None:

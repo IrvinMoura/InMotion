@@ -20,6 +20,7 @@ from inmotion.gestures.lean import DEFAULT_LEAN_PARAMS, lean_gesture
 from inmotion.gestures.march import (
     DEFAULT_SPRINT_PARAMS,
     DEFAULT_WALK_PARAMS,
+    MarchParams,
     sprint_gesture,
     walk_gesture,
 )
@@ -48,11 +49,14 @@ def build_body_gestures(
     params: Mapping[str, GestureParams] | None = None,
     geometry: GeometryConfig | None = None,
     crouch_feature: CrouchFeature = "shoulders",
+    march: MarchParams | None = None,
 ) -> list[FeatureGesture]:
     """Gestos de corpo para os ``names`` do perfil, na ordem de prioridade.
 
     O braço dominante (``handedness``) ataca e o outro usa item (CA2). ``params`` sobrescreve
     os padrões por nome; ``crouch_feature`` escolhe o sinal do agachar (ombros ou quadril).
+    ``march`` traz o
+    ``θ_on`` do passo, que o pulo usa para não disparar com o joelho erguido (RF6b da 018).
     """
     geometry = geometry if geometry is not None else GeometryConfig()
     merged = {**DEFAULT_GESTURE_PARAMS, **(params or {})}
@@ -63,7 +67,8 @@ def build_body_gestures(
     if "use" in wanted:
         gestures.append(punch_gesture("use", opposite(handedness), merged["use"], geometry))
     if "jump" in wanted:
-        gestures.append(jump_gesture(merged["jump"]))
+        knee_gate = (march or MarchParams()).step.theta_on
+        gestures.append(jump_gesture(merged["jump"], knee_gate))
     if "crouch" in wanted:
         gestures.append(crouch_gesture(merged["crouch"], crouch_feature))
     if "walk" in wanted:

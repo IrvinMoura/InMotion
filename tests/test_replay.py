@@ -215,6 +215,7 @@ def _replay_like_app(name: str, rest_band: float | None = None) -> tuple[Recordi
             config.gestures,
             config.geometry,
             config.crouch.feature,
+            config.march,
         )
         pipeline = Pipeline(
             safety,

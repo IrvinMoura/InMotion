@@ -775,3 +775,48 @@ def test_pause_releases_w_and_resume_does_not_resume_walking() -> None:
     for i in range(1, 11):
         pipeline.step(make_body(t=t0 + i * DT), t0 + i * DT)
     assert fake.pressed == set()
+
+
+def _bouncing_march(start: int, n_steps: int, every: int) -> list[PoseFrame]:
+    """Marcha rápida em que o quadril quica 33 px (j = 0,33 > θ_on do pulo) a cada passo, com o
+    joelho erguido (k = 0,8), como na T0."""
+    poses = []
+    for n in range(n_steps):
+        left = n % 2 == 0
+        for j in range(every):
+            lifted = j < STEP_FRAMES
+            lift = 0.8 if lifted else 0.0
+            i = start + n * every + j
+            poses.append(
+                make_body(
+                    t=i * DT,
+                    hip_y_px=267.0 if lifted else 300.0,
+                    knee_lift_left=lift if left else 0.0,
+                    knee_lift_right=0.0 if left else lift,
+                )
+            )
+    return poses
+
+
+def test_fast_march_bounce_does_not_press_space_but_real_jump_does() -> None:
+    """RF6b + CA7: o quique da marcha rápida não aperta `space`; um pulo real depois, sim."""
+    profile = GameProfile(
+        "teste",
+        {
+            "walk": Binding("w", GestureKind.HOLD),
+            "sprint": Binding("ctrl", GestureKind.HOLD),
+            "jump": Binding("space", GestureKind.TRIGGER),
+        },
+    )
+    pipeline, _, fake = build(build_body_gestures({"walk", "sprint", "jump"}), profile)
+    poses = _rest(20) + _bouncing_march(20, 12, FAST)
+    for pose in poses:
+        pipeline.step(pose, pose.t)
+    assert ("press", "w") in fake.events
+    assert [e for e in fake.events if e[1] == "space"] == []
+    start = 20 + 12 * FAST + 60  # para de marchar, espera soltar e a base repousar
+    for i in range(20 + 12 * FAST, start + 40):
+        pipeline.step(make_body(t=i * DT), i * DT)
+    for i in range(start + 40, start + 52):  # pulo real: quadril sobe 50 px, joelhos baixos
+        pipeline.step(make_body(t=i * DT, hip_y_px=250.0), i * DT)
+    assert [e for e in fake.events if e[1] == "space"][:1] == [("press", "space")]
