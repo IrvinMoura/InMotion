@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from inmotion.gestures.arbiter import ArbiterConfig
 from inmotion.gestures.base import EventKind, GestureEvent
 from inmotion.gestures.combo import ComboGesture
 from inmotion.gestures.factory import BODY_GESTURE_NAMES, build_arbiter, build_body_gestures
@@ -51,3 +52,20 @@ def test_combo_same_frame_and_validation() -> None:
     for members in (frozenset(), frozenset({"both"})):
         with pytest.raises(ValueError, match="combo"):
             ComboGesture("both", members)
+
+
+@pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 017 T2")
+def test_arbiter_built_from_profile_config() -> None:
+    """CA1: o árbitro segue a prioridade, os grupos e o combo da config (não do código)."""
+    config = ArbiterConfig(
+        priority=("both_arms", "crouch", "jump", "attack", "use"),
+        exclusive=(frozenset({"crouch", "jump"}),),
+        combos={"both_arms": frozenset({"attack", "use"})},
+    )
+    arbiter, combo = build_arbiter({"attack", "use", "jump", "crouch"}, config)
+    assert combo is not None
+    assert combo.name == "both_arms"
+    assert combo.members == {"attack", "use"}
+    # Prioridade da config: agachar vence o pulo (o padrão antigo dava o contrário).
+    out = arbiter.resolve([ev("crouch", EventKind.START), ev("jump", EventKind.PULSE)], 0.0)
+    assert [e.gesture for e in out] == ["crouch"]

@@ -15,6 +15,7 @@ from inmotion.gestures.features import (
     FrameContext,
     build_context,
     crouch_depth,
+    crouch_drop,
     forward_reach,
     jump_height,
     lean_forward,
@@ -185,3 +186,44 @@ def test_lean_forward_recovers_synthetic_lean(lean: float) -> None:
 def test_lean_forward_none_cases() -> None:
     assert lean_forward(make_body(with_world=False), GEOMETRY) is None
     assert lean_forward(make_body(visibility=0.0), GEOMETRY) is None
+
+
+# --- Spec 017: crouch_drop (agachar pelos ombros) ---------------------------------------------
+
+_T1_STUB = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 017 T5")
+
+
+def _shoulder_ctx(pose: PoseFrame, sbase: BodyBaseline, resting: bool = True) -> FrameContext:
+    hip_base = BodyBaseline(BaselineParams(init_frames=1))
+    return build_context(pose, pose.t, GEOMETRY, hip_base, resting, shoulder_baseline=sbase)
+
+
+@_T1_STUB
+@given(
+    k=st.floats(min_value=0.5, max_value=3.0),
+    drop=st.floats(min_value=-0.5, max_value=2.0),
+    x=st.floats(min_value=1000.0, max_value=3000.0),
+    y=st.floats(min_value=1500.0, max_value=3000.0),
+)
+def test_crouch_drop_invariant_to_translation_and_scale(
+    k: float, drop: float, x: float, y: float
+) -> None:
+    """CA5: ``c = (ȳ − b_o)/s`` vale ``drop`` (em larguras de ombro) para qualquer k, x, y."""
+    size = (4096, 4096)
+    sbase = BodyBaseline(BaselineParams(init_frames=1))
+    _shoulder_ctx(make_body(scale=k, hip_x_px=x, hip_y_px=y, size=size), sbase)  # b_o
+    dropped = make_body(scale=k, hip_x_px=x, hip_y_px=y, shoulder_dy_px=drop * 100.0 * k, size=size)
+    c = crouch_drop(_shoulder_ctx(dropped, sbase, resting=False))
+    assert c is not None
+    assert c == pytest.approx(drop, abs=1e-6)
+
+
+@_T1_STUB
+def test_crouch_drop_zero_at_baseline() -> None:
+    """CA5: na base, ``c ≈ 0``; sem base (menos de K amostras) é ``None``."""
+    sbase = BodyBaseline(BaselineParams(init_frames=2))
+    pose = make_body()
+    assert crouch_drop(_shoulder_ctx(pose, sbase)) is None  # 1 amostra de 2
+    c = crouch_drop(_shoulder_ctx(pose, sbase))
+    assert c is not None
+    assert c == pytest.approx(0.0, abs=1e-9)

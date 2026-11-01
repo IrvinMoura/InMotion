@@ -20,8 +20,30 @@ sempre passa.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 from inmotion.gestures.base import EventKind, GestureEvent
+
+
+@dataclass(frozen=True)
+class ArbiterConfig:
+    """Prioridade (antes = mais forte), grupos exclusivos e combos do árbitro (spec 017 RF2).
+
+    Vem da seção ``arbiter`` do perfil do jogo. Nomes sem gesto montado são ignorados na
+    montagem do árbitro (``build_arbiter``): um gesto sem binding não influencia nada.
+    """
+
+    priority: tuple[str, ...]
+    exclusive: tuple[frozenset[str], ...] = ()
+    combos: dict[str, frozenset[str]] = field(default_factory=dict)
+
+
+# Comportamento anterior à 017 (premissa 4): perfis sem seção ``arbiter`` não mudam.
+DEFAULT_ARBITER = ArbiterConfig(
+    priority=("both_arms", "attack", "use", "jump", "crouch", "walk"),
+    exclusive=(frozenset({"jump", "crouch"}),),
+    combos={"both_arms": frozenset({"attack", "use"})},
+)
 
 
 class GestureArbiter:

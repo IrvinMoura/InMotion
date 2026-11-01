@@ -6,8 +6,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from inmotion.gestures.arbiter import GestureArbiter
+from inmotion.gestures.arbiter import ArbiterConfig, GestureArbiter
 from inmotion.gestures.base import EventKind, Gesture, GestureEvent, GestureKind, GestureParams
+from inmotion.gestures.factory import build_arbiter
 
 
 def ev(name: str, kind: EventKind, t: float = 0.0) -> GestureEvent:
@@ -181,3 +182,57 @@ def test_unlisted_gesture_passes_through() -> None:
 def test_arbiter_rejects_inconsistent_configuration(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError, match=r"arbiter|priority"):
         GestureArbiter(**kwargs)  # type: ignore[arg-type]
+
+
+# --- Spec 017: prioridades do mapa de controles do Minecraft (RF2) ----------------------------
+
+# Seção ``arbiter`` do RF2 (a 017 só lista gestos existentes; aqui valem também os futuros).
+MINECRAFT_ARBITER = ArbiterConfig(
+    priority=(
+        "both_arms",
+        "crouch",
+        "jump",
+        "attack",
+        "use",
+        "walk",
+        "sprint",
+        "walk_back",
+        "strafe_left",
+        "strafe_right",
+    ),
+    exclusive=(
+        frozenset({"crouch", "jump"}),
+        frozenset({"crouch", "walk", "sprint", "walk_back"}),
+        frozenset({"walk", "sprint", "walk_back"}),
+        frozenset({"strafe_left", "strafe_right"}),
+    ),
+    combos={"both_arms": frozenset({"attack", "use"})},
+)
+
+_XFAIL_T2 = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 017 T2")
+
+
+def _kinds(events: list[GestureEvent]) -> list[tuple[str, EventKind]]:
+    return [(e.gesture, e.kind) for e in events]
+
+
+@_XFAIL_T2
+def test_crouch_beats_walk_and_walk_returns() -> None:
+    """CA3: agachar e andar juntos liberam só ``crouch``; ao soltar, ``walk`` volta com START."""
+    arbiter, _ = build_arbiter({"crouch", "walk"}, MINECRAFT_ARBITER)
+    out = arbiter.resolve([ev("walk", START), ev("crouch", START)], 0.0)
+    assert _kinds(out) == [("crouch", START)]
+    out = arbiter.resolve([ev("crouch", END, 1.0)], 1.0)
+    assert _kinds(out) == [("crouch", END), ("walk", START)]
+    assert arbiter.granted == frozenset({"walk"})
+
+
+@_XFAIL_T2
+def test_walk_coexists_with_jump() -> None:
+    """CA4: ``walk`` convive com ``jump`` e com ``strafe_left`` (fora dos grupos de ``crouch``)."""
+    arbiter, _ = build_arbiter({"walk", "jump", "strafe_left"}, MINECRAFT_ARBITER)
+    out = arbiter.resolve([ev("walk", START), ev("strafe_left", START)], 0.0)
+    assert {e.gesture for e in out} == {"walk", "strafe_left"}
+    out = arbiter.resolve([ev("jump", PULSE, 1.0)], 1.0)
+    assert _kinds(out) == [("jump", PULSE)]
+    assert arbiter.granted == frozenset({"walk", "strafe_left"})

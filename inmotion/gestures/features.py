@@ -93,6 +93,10 @@ class FrameContext:
     shoulder_px: float | None
     hip_y_px: float | None
     baseline_px: float | None
+    # Spec 017: ombros medidos direto em pixels, sem exigir os quadris (agachar pelos ombros).
+    shoulder_y_px: float | None = None
+    shoulder_width_px: float | None = None
+    shoulder_baseline_px: float | None = None
 
 
 def build_context(
@@ -101,6 +105,7 @@ def build_context(
     geometry: GeometryConfig,
     baseline: BodyBaseline,
     resting: bool,
+    shoulder_baseline: BodyBaseline | None = None,
 ) -> FrameContext:
     """Monta o contexto do frame: esqueleto normalizado (A6), ``s``, ``h`` e a base R7.
 
@@ -166,6 +171,11 @@ def crouch_depth(ctx: FrameContext) -> float | None:
     """RF4: ``(h − b)/s``, adimensional; positivo quando o quadril desce abaixo da base."""
     j = jump_height(ctx)
     return None if j is None else -j
+
+
+def crouch_drop(ctx: FrameContext) -> float | None:
+    """RF3: ``c = (ȳ_ombros − b_o)/s``; positivo quando os ombros descem abaixo da base."""
+    raise NotImplementedError("spec 017 T5: crouch_drop")
 
 
 def lean_forward(pose: PoseFrame, geometry: GeometryConfig) -> float | None:

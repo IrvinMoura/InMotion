@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-from inmotion.gestures.arbiter import GestureArbiter
+from inmotion.gestures.arbiter import ArbiterConfig, GestureArbiter
 from inmotion.gestures.base import GestureParams
 from inmotion.gestures.body import FeatureGesture
 from inmotion.gestures.combo import ComboGesture
@@ -62,12 +62,16 @@ def build_body_gestures(
     return gestures
 
 
-def build_arbiter(names: Collection[str]) -> tuple[GestureArbiter, ComboGesture | None]:
+def build_arbiter(
+    names: Collection[str], config: ArbiterConfig | None = None
+) -> tuple[GestureArbiter, ComboGesture | None]:
     """Árbitro do Minecraft para os gestos presentes e o combo ``both_arms``, se couber.
 
     - exclusivo ``{jump, crouch}`` (só vale se os dois existem);
     - combo ``both_arms = {attack, use}``: só suprime os dois braços (nenhuma ação).
     """
+    if config is not None:
+        raise NotImplementedError("spec 017 T2: árbitro a partir do ArbiterConfig")
     present = set(names)
     groups = [frozenset({"jump", "crouch"})] if {"jump", "crouch"} <= present else []
     combo = (

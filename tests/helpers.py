@@ -60,11 +60,15 @@ def make_body(
     size: tuple[int, int] = (640, 480),
     visibility: float = 1.0,
     with_world: bool = True,
+    hips_visible: bool = True,
+    shoulder_dy_px: float = 0.0,
 ) -> PoseFrame:
     """Pose sintética de uma pessoa de frente para a câmera.
 
     ``scale`` multiplica só os pixels (aproximar da câmera); o world é métrico e não muda.
     ``lean`` (rad) inclina o tronco para frente: os ombros vão em direção à câmera (z < 0).
+    ``hips_visible=False`` tira os quadris do quadro (visibilidade 0); ``shoulder_dy_px``
+    desce os ombros na imagem (pixels, y cresce para baixo), como no agachar (spec 017).
     """
     world = np.zeros((N_LANDMARKS, 4), dtype=np.float64)
     world[:, 3] = visibility
@@ -93,4 +97,11 @@ def make_body(
     lm[:, 2] = world[:, 2]
     lm[:, 3] = visibility
     lm[:, 4] = 1.0
+    for shoulder in (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER):
+        lm[shoulder, 1] += shoulder_dy_px / h_img
+    if not hips_visible:
+        for hip in (PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP):
+            lm[hip, 3] = 0.0
+            if with_world:
+                world[hip, 3] = 0.0
     return PoseFrame(t=t, image_size=size, landmarks=lm, world=world if with_world else None)
