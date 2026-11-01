@@ -25,6 +25,7 @@ from inmotion.gestures.base import GestureKind, GestureParams
 from inmotion.gestures.crouch import CrouchFeature
 from inmotion.gestures.factory import DEFAULT_GESTURE_PARAMS
 from inmotion.gestures.features import BaselineParams
+from inmotion.gestures.march import MarchParams
 from inmotion.input.backend import KeyName
 from inmotion.mapping import MapperParams
 from inmotion.safety import SafetyConfig
@@ -156,6 +157,7 @@ class AppConfig:
     gestures: dict[str, GestureParams] = field(default_factory=lambda: dict(DEFAULT_GESTURE_PARAMS))
     crouch: CrouchConfig = field(default_factory=CrouchConfig)
     baseline: BaselineParams = field(default_factory=BaselineParams)
+    march: MarchParams = field(default_factory=MarchParams)
     mapper: MapperParams = field(default_factory=MapperParams)
     geometry: GeometryConfig = field(default_factory=GeometryConfig)
     exit_zone: ExitZoneConfig = field(default_factory=ExitZoneConfig)

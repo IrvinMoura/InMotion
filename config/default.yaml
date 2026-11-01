@@ -75,6 +75,22 @@ baseline:
   # 01/11/2026); 0,15 = theta_off do pulo, acima do ruído parado (|j| <= 0,05).
   rest_band: 0.15
 
+# Marcha no lugar (spec 018): andar (w) e correr (ctrl). Valores INICIAIS da T0 (sessões
+# guiadas de 01/11/2026, 1,5 m e 2 m), a refinar na T6; nunca mude "no olho".
+#   step:             passo = joelho erguido, k = (base - (y_joelho - y_quadril))/s (R7, A6).
+#                     k parado <= 0,08 e no pulo <= 0,14; marchando p95 >= 0,38. theta_on 0,30
+#                     dá folga de 3,75x sobre o parado e 2,1x sobre o pulo.
+#   min_steps:        passos alternados para começar a andar (latencia ~ min_steps passos).
+#   step_timeout_s:   sem passo por tanto tempo para de andar. Intervalo da marcha lenta:
+#                     mediana 0,77-0,82 s, p95 0,91-1,14 s; 1,2 s = 1,05-1,3x sobre o p95.
+#   cadence_alpha:    alpha da EMA do intervalo entre passos (R1); constante de tempo 1/alpha.
+# O limiar de correr (f_on/f_off) fica em gestures.sprint.
+march:
+  min_steps: 2
+  step_timeout_s: 1.2
+  cadence_alpha: 0.5
+  step: {theta_on: 0.30, theta_off: 0.15, direction: above, debounce_frames: 1, cooldown_s: 0.0}
+
 # ActionMapper: duração do tap de um gesto trigger (> 1 tick de 50 ms do Minecraft).
 mapper:
   tap_hold_s: 0.08

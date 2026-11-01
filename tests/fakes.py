@@ -53,6 +53,7 @@ class FakeDirectInput:
         self.KEYBOARD_MAPPING: dict[str, int | None] = {
             "space": 57,
             "shift": 42,
+            "ctrl": 29,
             "w": 17,
             "f13": None,  # existe no dicionário do pydirectinput, mas sem scancode
         }

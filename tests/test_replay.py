@@ -224,6 +224,7 @@ def _replay_like_app(name: str, rest_band: float | None = None) -> tuple[Recordi
             profile=profile,
             mapper_params=config.mapper,
             baseline_params=baseline,
+            march_params=config.march,
             geometry=config.geometry,
         )
         return pipeline, safety

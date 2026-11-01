@@ -418,6 +418,7 @@ ALL_KEYS_PROFILE = GameProfile(
         "jump": Binding("space", GestureKind.TRIGGER),
         "crouch": Binding("shift", GestureKind.HOLD),
         "walk": Binding("w", GestureKind.HOLD),
+        "sprint": Binding("ctrl", GestureKind.HOLD),
     },
 )
 PROFILE_KEYS = {b.input for b in ALL_KEYS_PROFILE.bindings.values()}
@@ -452,6 +453,8 @@ def _random_pose(seed: int, mode: int, t: float) -> PoseFrame | None:
         t=t,
         hip_y_px=float(rng.choice([220.0, 300.0, 380.0])) + float(rng.normal(0.0, 5.0)),
         lean=float(rng.uniform(-0.6, 0.6)),
+        knee_lift_left=float(rng.choice([0.0, 0.0, 0.8])),
+        knee_lift_right=float(rng.choice([0.0, 0.0, 0.8])),
         left_arm=arm(),
         right_arm=arm(),
     )
@@ -649,3 +652,126 @@ def test_min_track_s_still_applies_to_shoulder_only_poses() -> None:
     assert gesture.updates == before
     pipeline.step(_squat(60, hips=False), 60 * DT)  # 0,5 s contínuos: volta a valer
     assert gesture.updates == before + 1
+
+
+# --- Spec 018: marcha no lugar no pipeline (RF3, RF4, RF6, CA6) ------------------------------
+
+MARCH_PROFILE = GameProfile(
+    "teste",
+    {"walk": Binding("w", GestureKind.HOLD), "sprint": Binding("ctrl", GestureKind.HOLD)},
+)
+STEP_FRAMES = 3  # frames com o joelho erguido em cada passo
+SLOW = 24  # marcha lenta: 0,8 s por passo (1,25 passos/s, mediana da T0)
+FAST = 9  # marcha rápida: 0,3 s por passo (3,3 passos/s)
+
+
+def _march_poses(start: int, n_steps: int, every: int, first_left: bool = True) -> list[PoseFrame]:
+    """Passos alternados a cada ``every`` frames, com o joelho erguido por ``STEP_FRAMES``."""
+    poses = []
+    for n in range(n_steps):
+        left = first_left == (n % 2 == 0)
+        for j in range(every):
+            lift = 0.8 if j < STEP_FRAMES else 0.0
+            i = start + n * every + j
+            poses.append(
+                make_body(
+                    t=i * DT,
+                    knee_lift_left=lift if left else 0.0,
+                    knee_lift_right=0.0 if left else lift,
+                )
+            )
+    return poses
+
+
+def _march_pipeline() -> tuple[Pipeline, SafetyManager, FakeInputBackend]:
+    return build(build_body_gestures({"walk", "sprint"}), MARCH_PROFILE)
+
+
+def _rest(n: int, start: int = 0) -> list[PoseFrame]:
+    return [make_body(t=(start + i) * DT) for i in range(n)]
+
+
+def test_slow_march_holds_w_without_ctrl_and_releases_on_stop() -> None:
+    """RF3 + CA6: marcha lenta (1,25 passos/s) aperta `w` no 2º passo; ao parar de marchar, solta
+    em `step_timeout_s` (1,2 s), sem perda de tracking e sem `ctrl`."""
+    pipeline, _, fake = _march_pipeline()
+    poses = _rest(20) + _march_poses(20, 6, SLOW) + _rest(60, 20 + 6 * SLOW)
+    for pose in poses:
+        pipeline.step(pose, pose.t)
+        assert "ctrl" not in fake.pressed
+    assert [e for e in fake.events if e[1] == "w"] == [("press", "w"), ("release", "w")]
+    assert fake.pressed == set()
+
+
+def test_w_released_within_step_timeout_after_last_step() -> None:
+    pipeline, _, fake = _march_pipeline()
+    last_step_i = 20 + 5 * SLOW  # 6 passos: o último começa neste frame
+    release_t = None
+    for pose in _rest(20) + _march_poses(20, 6, SLOW) + _rest(60, 20 + 6 * SLOW):
+        pipeline.step(pose, pose.t)
+        if release_t is None and ("release", "w") in fake.events:
+            release_t = pose.t
+    assert release_t is not None
+    elapsed = release_t - last_step_i * DT
+    assert 1.2 <= elapsed <= 1.2 + 2 * DT
+
+
+def test_fast_march_adds_ctrl_and_both_release_at_the_end() -> None:
+    """RF4: marcha rápida soma `ctrl` ao `w`; os dois soltam ao parar."""
+    pipeline, _, fake = _march_pipeline()
+    both = False
+    for pose in _rest(20) + _march_poses(20, 12, FAST) + _rest(60, 20 + 12 * FAST):
+        pipeline.step(pose, pose.t)
+        both = both or fake.pressed == {"w", "ctrl"}
+    assert both
+    assert fake.pressed == set()
+    assert fake.events.index(("press", "w")) < fake.events.index(("press", "ctrl"))
+
+
+def test_standing_still_never_presses() -> None:
+    pipeline, _, fake = _march_pipeline()
+    for pose in _rest(200):
+        pipeline.step(pose, pose.t)
+    assert fake.events == []
+
+
+def test_tracking_loss_releases_w_and_march_state_is_cleared() -> None:
+    """CA6/RF6: perda de tracking com `walk` ativo solta `w` em até `lost_timeout_s`; ao voltar,
+    o estado velho da marcha não reaparece (precisa de novos passos alternados)."""
+    pipeline, _, fake = _march_pipeline()
+    poses = _rest(20) + _march_poses(20, 4, SLOW)
+    for pose in poses:
+        pipeline.step(pose, pose.t)
+    assert fake.pressed == {"w"}
+    t_lost = poses[-1].t
+    released_at = None
+    for k in range(1, 12):
+        t = t_lost + k * DT
+        pipeline.step(None, t)
+        if released_at is None and fake.pressed == set():
+            released_at = t
+    assert released_at is not None
+    assert released_at - t_lost <= 0.2 + DT
+    start = 20 + 4 * SLOW + 12
+    for pose in _rest(40, start) + _march_poses(start + 40, 1, SLOW):  # um só passo ao voltar
+        pipeline.step(pose, pose.t)
+    assert fake.pressed == set()  # um passo isolado não anda
+    for pose in _march_poses(start + 40 + SLOW, 1, SLOW, first_left=False):
+        pipeline.step(pose, pose.t)
+    assert fake.pressed == {"w"}  # o 2º passo alternado anda
+
+
+def test_pause_releases_w_and_resume_does_not_resume_walking() -> None:
+    pipeline, safety, fake = _march_pipeline()
+    poses = _rest(20) + _march_poses(20, 4, SLOW)
+    for pose in poses:
+        pipeline.step(pose, pose.t)
+    assert fake.pressed == {"w"}
+    t0 = poses[-1].t + DT
+    safety.on_hotkeys(frozenset({"f8"}))
+    pipeline.step(make_body(t=t0), t0)
+    assert fake.pressed == set()
+    safety.on_hotkeys(frozenset({"f8"}))  # retoma
+    for i in range(1, 11):
+        pipeline.step(make_body(t=t0 + i * DT), t0 + i * DT)
+    assert fake.pressed == set()

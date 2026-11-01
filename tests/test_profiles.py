@@ -11,10 +11,10 @@ from tests.fakes import FakeDirectInput
 
 
 def test_minecraft_profile_valid() -> None:
-    """Todo gesto do perfil existe e toda tecla é suportada (teclas ``space``/``shift``)."""
+    """Todo gesto do perfil existe e toda tecla é suportada (inclui ``w`` e ``ctrl``)."""
     _, profile = load_config(game="minecraft")
     assert profile is not None
-    assert set(profile.bindings) == BODY_GESTURE_NAMES - {"walk", "sprint", "lean"}  # marcha: T5
+    assert set(profile.bindings) == BODY_GESTURE_NAMES - {"lean"}  # `lean` não tem binding
     keys = KeyboardMouseBackend(api=FakeDirectInput()).supported_keys()
     validate_profile(profile, BODY_GESTURE_NAMES, keys)
 
@@ -36,15 +36,19 @@ def test_default_profile_equals_minecraft_yaml() -> None:
 
 
 def test_minecraft_arbiter() -> None:
-    """Spec 017 RF2/RF7: a seção ``arbiter`` do perfil lista só gestos que existem hoje."""
+    """Spec 017 RF2/RF7 (e 018): a seção ``arbiter`` lista só gestos que existem."""
     from inmotion.gestures.arbiter import ArbiterConfig
     from inmotion.gestures.factory import build_arbiter
 
     _, profile = load_config(game="minecraft")
     assert profile is not None
     assert profile.arbiter == ArbiterConfig(
-        priority=("both_arms", "crouch", "jump", "attack", "use"),
-        exclusive=(frozenset({"crouch", "jump"}),),
+        priority=("both_arms", "crouch", "jump", "attack", "use", "walk", "sprint"),
+        exclusive=(
+            frozenset({"crouch", "jump"}),
+            frozenset({"crouch", "walk"}),
+            frozenset({"crouch", "sprint"}),
+        ),
         combos={"both_arms": frozenset({"attack", "use"})},
     )
     arbiter, combo = build_arbiter(set(profile.bindings), profile.arbiter)
@@ -81,3 +85,47 @@ def test_minecraft_rest_presses_nothing() -> None:
         pipeline.step(make_body(t=i * dt, lean=0.35), i * dt)
     assert fake.events == []
     assert fake.pressed == set()
+
+
+def test_minecraft_walk_and_sprint_bindings() -> None:
+    """Spec 018: andar é `w` e correr é `ctrl`, os dois em hold."""
+    from inmotion.gestures.base import GestureKind
+
+    _, profile = load_config(game="minecraft")
+    assert profile is not None
+    assert (profile.bindings["walk"].input, profile.bindings["walk"].kind) == (
+        "w",
+        GestureKind.HOLD,
+    )
+    assert (profile.bindings["sprint"].input, profile.bindings["sprint"].kind) == (
+        "ctrl",
+        GestureKind.HOLD,
+    )
+
+
+def test_minecraft_arbiter_crouch_beats_walk_and_sprint_jump_coexists() -> None:
+    """CA5: `crouch` suprime `walk` e `sprint`; `jump` convive com os dois; `walk` e `sprint`
+    convivem entre si (correr soma `ctrl` ao `w`)."""
+    from inmotion.gestures.base import EventKind, GestureEvent
+    from inmotion.gestures.factory import build_arbiter
+
+    def ev(name: str, kind: EventKind, t: float = 0.0) -> GestureEvent:
+        return GestureEvent(name, kind, t)
+
+    _, profile = load_config(game="minecraft")
+    assert profile is not None
+    arbiter, _ = build_arbiter(BODY_GESTURE_NAMES, profile.arbiter)
+    arbiter.resolve([ev("walk", EventKind.START), ev("sprint", EventKind.START)], 0.0)
+    assert arbiter.granted == {"walk", "sprint"}  # convivem
+    out = arbiter.resolve([ev("jump", EventKind.PULSE, 1.0)], 1.0)
+    assert [e.gesture for e in out] == ["jump"]
+    assert arbiter.granted == {"walk", "sprint"}  # o pulo não solta a marcha
+    out = arbiter.resolve([ev("crouch", EventKind.START, 2.0)], 2.0)
+    assert {(e.gesture, e.kind) for e in out} == {
+        ("walk", EventKind.END),
+        ("sprint", EventKind.END),
+        ("crouch", EventKind.START),
+    }
+    assert arbiter.granted == {"crouch"}
+    out = arbiter.resolve([ev("crouch", EventKind.END, 3.0)], 3.0)
+    assert arbiter.granted == {"walk", "sprint"}  # voltam quando o agachar solta

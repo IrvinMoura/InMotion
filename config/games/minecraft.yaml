@@ -7,7 +7,8 @@
 #   usar / colocar     braço não dominante esticado                mouse_right  hold     008
 #   pular              subida do quadril (J1)                      space        trigger  008
 #   agachar            ombros abaixo da base calibrada             shift        hold     017
-#   andar / correr     marcha no lugar                             w / ctrl+w            018 (futuro)
+#   andar              marcha no lugar (2 passos alternados)       w            hold     018
+#   correr             marcha rápida; soma ctrl ao w do andar      ctrl         hold     018
 #   andar p/ trás e    inclinar o tronco para trás / para o lado   s / a / d            019 (futuro)
 #     para os lados
 #   câmera             cabeça, em controle de velocidade           mouse X/Y             014 (futuro)
@@ -18,23 +19,29 @@
 # Modo canhoto: `--set handedness=left` (ou `handedness: left` no perfil do usuário) troca
 # os braços: o esquerdo ataca (mouse_left) e o direito usa (mouse_right).
 #
-# `walk` (inclinar o tronco) saiu do perfil: a inclinação parado já passa do limiar e deixava
-# `w` apertado. O gesto continua no código e um perfil pode ligá-lo; a marcha é a spec 018.
+# `lean` (inclinar o tronco) não tem binding: a inclinação parado já passava do limiar e
+# deixava `w` apertado (spec 017). O gesto continua no código para a spec 019.
+# `sprint` só existe com `walk` ativo, então `w` segue apertado e `ctrl` soma (spec 018).
 name: minecraft
 bindings:
   attack: {input: mouse_left,  kind: hold}
   use:    {input: mouse_right, kind: hold}
   jump:   {input: space,       kind: trigger}
   crouch: {input: shift,       kind: hold}
+  walk:   {input: w,           kind: hold}
+  sprint: {input: ctrl,        kind: hold}
 
 # Prioridades (spec 017 RF2): antes = mais forte. Quem é mais forte suprime o mais fraco só
 # dentro de um grupo exclusivo; fora deles os gestos convivem. O combo suprime os membros.
-# Só gestos que existem entram aqui (nome desconhecido é erro); as specs 018/019 acrescentam
-# sprint, walk_back e strafe_* à prioridade e aos grupos [crouch, walk, ...] quando criarem
-# os gestos.
+# Só gestos que existem entram aqui (nome desconhecido é erro); a spec 019 acrescenta
+# walk_back e strafe_* à prioridade e aos grupos quando criar os gestos. `walk` e `sprint`
+# NÃO são exclusivos entre si (correr soma ctrl ao w); o agachar vence os dois. Um grupo
+# libera só um membro, por isso são dois pares [crouch, walk] e [crouch, sprint].
 arbiter:
-  priority: [both_arms, crouch, jump, attack, use]
+  priority: [both_arms, crouch, jump, attack, use, walk, sprint]
   exclusive:
     - [crouch, jump]
+    - [crouch, walk]
+    - [crouch, sprint]
   combos:
     both_arms: [attack, use]

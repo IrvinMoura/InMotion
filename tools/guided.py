@@ -462,6 +462,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         profile=profile,
         mapper_params=config.mapper,
         baseline_params=config.baseline,
+        march_params=config.march,
         geometry=config.geometry,
     )
     schedule = Schedule(SCRIPTS[args.script](config.handedness))

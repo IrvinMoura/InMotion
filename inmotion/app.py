@@ -57,10 +57,16 @@ DEFAULT_PROFILE = GameProfile(
         "use": Binding("mouse_right", GestureKind.HOLD),
         "jump": Binding("space", GestureKind.TRIGGER),
         "crouch": Binding("shift", GestureKind.HOLD),
+        "walk": Binding("w", GestureKind.HOLD),
+        "sprint": Binding("ctrl", GestureKind.HOLD),
     },
     ArbiterConfig(
-        priority=("both_arms", "crouch", "jump", "attack", "use"),
-        exclusive=(frozenset({"crouch", "jump"}),),
+        priority=("both_arms", "crouch", "jump", "attack", "use", "walk", "sprint"),
+        exclusive=(
+            frozenset({"crouch", "jump"}),
+            frozenset({"crouch", "walk"}),
+            frozenset({"crouch", "sprint"}),
+        ),
         combos={"both_arms": frozenset({"attack", "use"})},
     ),
 )
@@ -168,6 +174,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
         profile=deps.profile,
         mapper_params=config.mapper,
         baseline_params=config.baseline,
+        march_params=config.march,
         geometry=config.geometry,
     )
     watchdog = Watchdog(safety_config.watchdog_timeout_s)

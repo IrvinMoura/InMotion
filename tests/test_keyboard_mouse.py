@@ -60,7 +60,9 @@ def test_supported_keys() -> None:
     """Teclas com scancode mais os botões do mouse; ``f13`` (sem scancode) fica de fora."""
     keys = KeyboardMouseBackend(api=FakeDirectInput()).supported_keys()
 
-    assert keys == frozenset({"space", "shift", "w", "mouse_left", "mouse_right", "mouse_middle"})
+    assert keys == frozenset(
+        {"space", "shift", "ctrl", "w", "mouse_left", "mouse_right", "mouse_middle"}
+    )
 
 
 # --- Hardware (rodar com `pytest -m hardware`; enviam input real ao Windows) ----------

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from inmotion.config.schema import GameProfile
 from inmotion.exit_zone import ExitZoneState
@@ -12,12 +12,13 @@ from inmotion.fps import FpsMeter
 from inmotion.gestures.base import GestureState
 from inmotion.gestures.body import BodyGesture, all_idle
 from inmotion.gestures.factory import build_arbiter
-from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context
+from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context, knee_lift
+from inmotion.gestures.march import MarchParams, MarchTracker
 from inmotion.mapping import ActionMapper, MapperParams
 from inmotion.safety import SafetyManager, SafetyState
 from inmotion.types import PoseFrame
 from inmotion.vision.geometry import GeometryConfig, is_visible
-from inmotion.vision.landmarks import PoseLandmark
+from inmotion.vision.landmarks import PoseLandmark, Side
 
 # Ombros e quadris: sem eles visíveis a pose é fantasma/parcial e não conta como tracking.
 TORSO: tuple[int, ...] = (
@@ -64,6 +65,7 @@ class Pipeline:
         profile: GameProfile,
         mapper_params: MapperParams | None = None,
         baseline_params: BaselineParams | None = None,
+        march_params: MarchParams | None = None,
         geometry: GeometryConfig | None = None,
     ) -> None:
         self._safety = safety
@@ -77,6 +79,7 @@ class Pipeline:
             BodyBaseline(baseline_params or BaselineParams()),
             BodyBaseline(baseline_params or BaselineParams()),
         )
+        self._march = MarchTracker(march_params or MarchParams())  # spec 018
         self._crouch = next((g for g in self._gestures if g.name == _CROUCH), None)
         self._arbiter, self._combo = build_arbiter(
             [g.name for g in self._gestures], profile.arbiter
@@ -161,9 +164,10 @@ class Pipeline:
         self._shoulder_baseline.reset()
         for knee_baseline in self._knee_baselines:
             knee_baseline.reset()
+        self._march.reset()
 
     def _run_gestures(self, pose: PoseFrame, t: float) -> None:
-        """Repouso (estado do frame anterior) → contexto → gestos → árbitro → mapper."""
+        """Repouso (estado do frame anterior) → contexto → marcha → gestos → árbitro → mapper."""
         resting = all_idle(self._gestures)
         ctx = build_context(
             pose,
@@ -174,6 +178,8 @@ class Pipeline:
             self._shoulder_baseline,
             self._knee_baselines,
         )
+        march = self._march.update(knee_lift(ctx, Side.LEFT), knee_lift(ctx, Side.RIGHT), t)
+        ctx = replace(ctx, march=march)  # estado da marcha: uma vez por frame, antes dos gestos
         events = [e for g in self._gestures if (e := g.update(ctx)) is not None]
         if self._combo is not None:
             events.extend(self._combo.derive(events, t))
