@@ -121,3 +121,16 @@ def test_render_frame_shows_counter() -> None:
     base = render_frame(frame, "3 PULOS", 3.0, Phase.RUN, "ATIVO", [], [])
     with_counter = render_frame(frame, "3 PULOS", 3.0, Phase.RUN, "ATIVO", [], [], counter=(2, 3))
     assert with_counter.sum() > base.sum()
+
+
+def test_key_held_into_a_step_counts_as_extra() -> None:
+    """Bug: `w` apertado antes do "parado" e segurado durante ele passava como OK."""
+    sched = Schedule(STEPS, prep_s=2.0)
+    presses = [(1.0, "w")]  # no aviso do passo 0, nunca solto
+    releases: list[tuple[float, str]] = []
+    rest, _, _ = score_steps(sched, presses, KEYS, grace_s=0.5, releases=releases)
+    assert rest.ok is False
+    assert rest.extras == ("w",)
+    # solto antes do passo começar: não conta
+    rest2, _, _ = score_steps(sched, presses, KEYS, grace_s=0.5, releases=[(1.5, "w")])
+    assert rest2.ok is True

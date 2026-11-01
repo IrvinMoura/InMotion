@@ -125,21 +125,44 @@ def score_steps(
     presses: Sequence[tuple[float, KeyName]],
     gesture_keys: Mapping[str, KeyName],
     grace_s: float = GRACE_S,
+    releases: Sequence[tuple[float, KeyName]] = (),
 ) -> list[StepScore]:
     """Compara as teclas que teriam sido apertadas com o esperado de cada passo.
 
-    A tecla esperada conta em ``[início, fim + grace_s)``; qualquer outra tecla dentro da
-    execução do passo é "extra" e reprova. Passo com ``expected=None`` não é pontuado.
+    A tecla esperada conta em ``[início, fim + grace_s)``; qualquer outra tecla apertada
+    durante a execução do passo, **ou apertada antes e ainda segurada quando ele começa**,
+    é "extra" e reprova. Passo com ``expected=None`` não é pontuado.
     """
     scores: list[StepScore] = []
     for i, step in enumerate(schedule.steps):
         start, end = schedule.run_window(i)
         key = gesture_keys.get(step.gesture) if step.gesture else None
         got = sum(1 for t, k in presses if k == key and start <= t < end + grace_s)
-        extras = tuple(k for t, k in presses if k != key and start <= t < end)
+        extras = _held_at(presses, releases, start, exclude=key) + tuple(
+            k for t, k in presses if k != key and start <= t < end
+        )
         ok = None if step.expected is None else (got == step.expected and not extras)
         scores.append(StepScore(step.label, step.title, step.expected, got, extras, ok))
     return scores
+
+
+def _held_at(
+    presses: Sequence[tuple[float, KeyName]],
+    releases: Sequence[tuple[float, KeyName]],
+    t: float,
+    exclude: KeyName | None,
+) -> tuple[KeyName, ...]:
+    """Teclas apertadas antes de ``t`` e ainda não soltas em ``t`` (ordem de aperto)."""
+    held: dict[KeyName, None] = {}
+    events = sorted([(tp, 1, k) for tp, k in presses] + [(tr, 0, k) for tr, k in releases])
+    for te, is_press, k in events:
+        if te >= t:
+            break
+        if is_press:
+            held[k] = None
+        else:
+            held.pop(k, None)
+    return tuple(k for k in held if k != exclude)
 
 
 def step_labels(schedule: Schedule) -> list[LabelInterval]:
@@ -303,12 +326,13 @@ class _LogBackend:
     def __init__(self) -> None:
         self.t = 0.0
         self.presses: list[tuple[float, KeyName]] = []
+        self.releases: list[tuple[float, KeyName]] = []
 
     def press(self, key: KeyName) -> None:
         self.presses.append((self.t, key))
 
     def release(self, key: KeyName) -> None:
-        pass
+        self.releases.append((self.t, key))
 
 
 def _counter(
@@ -466,7 +490,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             saved = recorder.save(out, labels)
             logger.info("gravação salva em %s", saved)
 
-    scores = score_steps(schedule, backend.presses, keys)
+    scores = score_steps(schedule, backend.presses, keys, releases=backend.releases)
     summary = out.with_suffix(".json")
     summary.parent.mkdir(parents=True, exist_ok=True)
     summary.write_text(
