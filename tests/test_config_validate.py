@@ -352,3 +352,97 @@ def test_safety_watchdog_timeout_is_validated() -> None:
     with pytest.raises(ConfigError) as exc:
         build(AppConfig, {"safety": {"watchdog_timeout_s": 0}})
     assert exc.value.path == "safety.watchdog_timeout_s"
+
+
+# --- Spec 017: seção ``arbiter`` do perfil (CA2) -----------------------------------------------
+
+
+def _arbiter_profile(arbiter: dict[str, object]) -> GameProfile:
+    bindings = {"jump": {"input": "space", "kind": "hold"}}
+    return build(GameProfile, {"name": "teste", "bindings": bindings, "arbiter": arbiter})
+
+
+def test_arbiter_section_builds_into_an_immutable_config() -> None:
+    """CA1/CA2: a seção do YAML vira ``ArbiterConfig`` (listas viram tuplas e conjuntos)."""
+    profile = _arbiter_profile(
+        {
+            "priority": ["both_arms", "jump", "attack", "use"],
+            "exclusive": [["jump", "attack"]],
+            "combos": {"both_arms": ["attack", "use"]},
+        }
+    )
+    assert profile.arbiter.priority == ("both_arms", "jump", "attack", "use")
+    assert profile.arbiter.exclusive == (frozenset({"jump", "attack"}),)
+    assert profile.arbiter.combos == {"both_arms": frozenset({"attack", "use"})}
+    validate_profile(profile, KNOWN, KEYS)  # não lança
+
+
+def test_profile_without_arbiter_section_uses_the_default() -> None:
+    """Premissa 4: sem a seção vale o padrão anterior, e ele não é validado contra os gestos."""
+    from inmotion.gestures.arbiter import DEFAULT_ARBITER
+
+    profile = _profile({"jump": {"input": "space", "kind": "hold"}})
+    assert profile.arbiter == DEFAULT_ARBITER
+    validate_profile(profile, KNOWN, KEYS)  # `crouch` e `walk` do padrão não existem em KNOWN
+
+
+def test_arbiter_rejects_repeated_name_in_priority() -> None:
+    profile = _arbiter_profile({"priority": ["jump", "attack", "jump"]})
+    with pytest.raises(ConfigError) as exc:
+        validate_profile(profile, KNOWN, KEYS)
+    assert exc.value.path == "arbiter.priority[2]"
+    assert "repetido" in exc.value.message
+    assert "jump" in exc.value.message
+
+
+def test_arbiter_rejects_unknown_name_with_suggestion() -> None:
+    profile = _arbiter_profile({"priority": ["jump", "atack"]})
+    with pytest.raises(ConfigError) as exc:
+        validate_profile(profile, KNOWN, KEYS)
+    assert exc.value.path == "arbiter.priority[1]"
+    assert "desconhecido" in exc.value.message
+    assert "attack" in exc.value.message  # sugestão
+
+
+def test_arbiter_rejects_unknown_name_in_exclusive_group() -> None:
+    profile = _arbiter_profile({"priority": ["jump"], "exclusive": [["jump", "voar"]]})
+    with pytest.raises(ConfigError) as exc:
+        validate_profile(profile, KNOWN, KEYS)
+    assert exc.value.path == "arbiter.exclusive[0]"
+    assert "voar" in exc.value.message
+
+
+@pytest.mark.parametrize(
+    ("combos", "word"),
+    [
+        ({"both": []}, "vazio"),
+        ({"both": ["both", "attack"]}, "si mesmo"),
+        ({"both": ["attack", "voar"]}, "desconhecido"),
+    ],
+)
+def test_arbiter_rejects_bad_combo(combos: dict[str, list[str]], word: str) -> None:
+    profile = _arbiter_profile({"priority": ["both", "attack", "use"], "combos": combos})
+    with pytest.raises(ConfigError) as exc:
+        validate_profile(profile, KNOWN, KEYS)
+    assert exc.value.path == "arbiter.combos.both"
+    assert word in exc.value.message
+
+
+def test_arbiter_rejects_combo_missing_from_priority() -> None:
+    profile = _arbiter_profile({"priority": ["attack", "use"], "combos": {"both": ["attack"]}})
+    with pytest.raises(ConfigError) as exc:
+        validate_profile(profile, KNOWN, KEYS)
+    assert exc.value.path == "arbiter.combos.both"
+    assert "priority" in exc.value.message
+
+
+def test_arbiter_wrong_types_are_config_errors() -> None:
+    with pytest.raises(ConfigError) as exc:
+        _arbiter_profile({"priority": "jump"})
+    assert exc.value.path == "arbiter.priority"
+    with pytest.raises(ConfigError) as exc:
+        _arbiter_profile({"priority": ["jump"], "combos": {"both": "attack"}})
+    assert exc.value.path == "arbiter.combos.both"
+    with pytest.raises(ConfigError) as exc:
+        _arbiter_profile({"prioridade": ["jump"]})
+    assert exc.value.path == "arbiter.prioridade"

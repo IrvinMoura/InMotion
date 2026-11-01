@@ -21,7 +21,7 @@ CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "default.yaml"
 GAMES_DIR = CONFIG_DIR / "games"
 # Chaves de topo que pertencem ao ``GameProfile``; o resto da camada é do ``AppConfig``.
-PROFILE_KEYS = ("name", "bindings")
+PROFILE_KEYS = ("name", "bindings", "arbiter")
 _SET_LABEL = "--set"
 
 

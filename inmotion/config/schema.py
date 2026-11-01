@@ -190,8 +190,11 @@ def validate_profile(
 ) -> None:
     """RF7: todo gesto do perfil existe e toda tecla/botão é suportado pelo backend.
 
+    Valida também a seção ``arbiter`` (spec 017), exceto quando é o padrão (perfil sem a seção).
+
     Raises:
-        ConfigError: com o caminho ``bindings.<gesto>`` ou ``bindings.<gesto>.input``.
+        ConfigError: com o caminho ``bindings.<gesto>``, ``bindings.<gesto>.input`` ou
+            ``arbiter.*`` (``priority[i]``, ``exclusive[i]``, ``combos.<nome>``).
     """
     for gesture, binding in profile.bindings.items():
         path = f"bindings.{gesture}"
@@ -208,3 +211,45 @@ def validate_profile(
                 f"tecla ou botão não suportado {binding.input!r}.{hint}"
                 " Veja as teclas aceitas pelo backend de input.",
             )
+
+    if profile.arbiter != DEFAULT_ARBITER:
+        _validate_arbiter(profile.arbiter, known_gestures)
+
+
+def _validate_arbiter(arbiter: ArbiterConfig, known_gestures: frozenset[str]) -> None:
+    """Spec 017 RF2: nomes sem repetição e conhecidos; combos não vazios e fora de si mesmos.
+
+    Um nome vale se for um gesto existente ou um combo declarado em ``combos``. Os membros de
+    um combo e os de um grupo exclusivo devem ser gestos existentes, e todo combo precisa
+    constar em ``priority`` (senão a supressão que ele faz nunca valeria).
+    """
+    combos = set(arbiter.combos)
+    names = known_gestures | combos
+    seen: set[str] = set()
+    for i, name in enumerate(arbiter.priority):
+        path = f"arbiter.priority[{i}]"
+        if name in seen:
+            raise ConfigError(path, f"nome repetido {name!r}; cada nome aparece uma vez")
+        seen.add(name)
+        if name not in names:
+            raise ConfigError(path, _unknown_name(name, names))
+    for i, group in enumerate(arbiter.exclusive):
+        for name in sorted(group - names):
+            raise ConfigError(f"arbiter.exclusive[{i}]", _unknown_name(name, names))
+    for combo, members in arbiter.combos.items():
+        path = f"arbiter.combos.{combo}"
+        if combo not in seen:
+            raise ConfigError(path, f"o combo {combo!r} precisa constar em arbiter.priority")
+        if not members:
+            raise ConfigError(path, "combo vazio: liste os gestos que ele reúne")
+        if combo in members:
+            raise ConfigError(path, f"o combo {combo!r} não pode conter a si mesmo")
+        for name in sorted(members - known_gestures):
+            raise ConfigError(path, _unknown_name(name, known_gestures))
+
+
+def _unknown_name(name: str, options: Collection[str]) -> str:
+    return (
+        f"nome desconhecido {name!r}.{_suggestion(name, options)}"
+        f" Nomes conhecidos: {sorted(options)}"
+    )

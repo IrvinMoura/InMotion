@@ -188,3 +188,27 @@ def test_camera_default_comes_only_from_yaml() -> None:
     assert load_camera_config(index=3, width=800).width == 800
     assert load_camera_config(index=3).index == 3
     assert load_camera_config(index=None).index == 1
+
+
+def test_game_layer_arbiter_section_reaches_the_profile(tmp_path: Path) -> None:
+    """Spec 017: a seção ``arbiter`` do jogo chega ao ``GameProfile`` (não ao ``AppConfig``)."""
+    games = tmp_path / "games"
+    write(
+        games / "teste.yaml",
+        GAME + "arbiter:\n  priority: [jump, attack]\n  exclusive: [[jump, attack]]\n",
+    )
+    default = write(tmp_path / "default.yaml", DEFAULT)
+    _, profile = load_config(default_path=default, game="teste", games_dir=games)
+    assert profile is not None
+    assert profile.arbiter.priority == ("jump", "attack")
+    assert profile.arbiter.exclusive == (frozenset({"jump", "attack"}),)
+
+
+def test_arbiter_error_names_the_file_that_defined_it(tmp_path: Path) -> None:
+    games = tmp_path / "games"
+    game = write(games / "teste.yaml", GAME + "arbiter:\n  priority: jump\n")
+    default = write(tmp_path / "default.yaml", DEFAULT)
+    with pytest.raises(ConfigError) as exc:
+        load_config(default_path=default, game="teste", games_dir=games)
+    assert exc.value.path == "arbiter.priority"
+    assert str(game) in str(exc.value)
