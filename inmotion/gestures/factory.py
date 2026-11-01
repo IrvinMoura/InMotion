@@ -1,7 +1,8 @@
 """Montagem dos gestos de corpo e do árbitro (spec 008). Núcleo puro.
 
-Os nomes são os do perfil de jogo: ``attack`` e ``use`` (socos), ``jump``, ``crouch`` e
-``walk`` (inclinar o tronco). Só existem os gestos que o perfil mapeia: um gesto sem
+Os nomes são os do perfil de jogo: ``attack`` e ``use`` (socos), ``jump``, ``crouch``,
+``walk`` e ``sprint`` (marcha no lugar, spec 018) e ``lean`` (inclinar o tronco). Só existem
+os gestos que o perfil mapeia: um gesto sem
 binding não pode influenciar o repouso (R7) nem os grupos exclusivos.
 """
 
@@ -16,18 +17,28 @@ from inmotion.gestures.combo import ComboGesture
 from inmotion.gestures.crouch import DEFAULT_CROUCH_PARAMS, CrouchFeature, crouch_gesture
 from inmotion.gestures.jump import DEFAULT_JUMP_PARAMS, jump_gesture
 from inmotion.gestures.lean import DEFAULT_LEAN_PARAMS, lean_gesture
+from inmotion.gestures.march import (
+    DEFAULT_SPRINT_PARAMS,
+    DEFAULT_WALK_PARAMS,
+    sprint_gesture,
+    walk_gesture,
+)
 from inmotion.gestures.punch import DEFAULT_PUNCH_PARAMS, opposite, punch_gesture
 from inmotion.vision.geometry import GeometryConfig
 from inmotion.vision.landmarks import Side
 
-BODY_GESTURE_NAMES: frozenset[str] = frozenset({"attack", "use", "jump", "crouch", "walk"})
+BODY_GESTURE_NAMES: frozenset[str] = frozenset(
+    {"attack", "use", "jump", "crouch", "walk", "sprint", "lean"}
+)
 
 DEFAULT_GESTURE_PARAMS: Mapping[str, GestureParams] = {
     "attack": DEFAULT_PUNCH_PARAMS,
     "use": DEFAULT_PUNCH_PARAMS,
     "jump": DEFAULT_JUMP_PARAMS,
     "crouch": DEFAULT_CROUCH_PARAMS,
-    "walk": DEFAULT_LEAN_PARAMS,
+    "walk": DEFAULT_WALK_PARAMS,
+    "sprint": DEFAULT_SPRINT_PARAMS,
+    "lean": DEFAULT_LEAN_PARAMS,
 }
 
 
@@ -56,7 +67,11 @@ def build_body_gestures(
     if "crouch" in wanted:
         gestures.append(crouch_gesture(merged["crouch"], crouch_feature))
     if "walk" in wanted:
-        gestures.append(lean_gesture(merged["walk"], geometry))
+        gestures.append(walk_gesture(merged["walk"]))
+    if "sprint" in wanted:
+        gestures.append(sprint_gesture(merged["sprint"]))
+    if "lean" in wanted:
+        gestures.append(lean_gesture(merged["lean"], geometry))
     return gestures
 
 

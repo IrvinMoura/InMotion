@@ -14,7 +14,7 @@ def test_minecraft_profile_valid() -> None:
     """Todo gesto do perfil existe e toda tecla é suportada (teclas ``space``/``shift``)."""
     _, profile = load_config(game="minecraft")
     assert profile is not None
-    assert set(profile.bindings) == BODY_GESTURE_NAMES - {"walk"}  # `walk` só na spec 018
+    assert set(profile.bindings) == BODY_GESTURE_NAMES - {"walk", "sprint", "lean"}  # marcha: T5
     keys = KeyboardMouseBackend(api=FakeDirectInput()).supported_keys()
     validate_profile(profile, BODY_GESTURE_NAMES, keys)
 

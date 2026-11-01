@@ -16,6 +16,7 @@ from inmotion.gestures.base import (
     GestureParams,
 )
 from inmotion.gestures.body import FeatureGesture
+from inmotion.gestures.features import FrameContext
 from inmotion.vision.landmarks import Side
 
 # Passo (spec 018 T0): k parado <= 0,08, no pulo <= 0,14, marchando p95 >= 0,38.
@@ -140,11 +141,33 @@ class MarchTracker:
         self._clear()
 
 
+def _walking_signal(ctx: FrameContext) -> float:
+    """``1`` com a marcha em curso (``ctx.march.walking``), senão ``0``."""
+    return 1.0 if ctx.march is not None and ctx.march.walking else 0.0
+
+
+def _cadence_signal(ctx: FrameContext) -> float:
+    """Cadência ``f`` (passos/s) enquanto anda; ``0`` parado ou sem cadência ainda."""
+    march = ctx.march
+    if march is None or not march.walking or march.cadence is None:
+        return 0.0
+    return march.cadence
+
+
 def walk_gesture(params: GestureParams = DEFAULT_WALK_PARAMS) -> FeatureGesture:
-    """Gesto HOLD ``walk`` sobre ``ctx.march``."""
-    raise NotImplementedError
+    """Gesto HOLD ``walk`` (RF3): segura enquanto a marcha está em curso.
+
+    A feature é ``1`` com ``ctx.march.walking`` e ``0`` fora; os limiares 0,6/0,4 só separam
+    esses dois níveis (R6). O início (``min_steps`` passos alternados) e o fim
+    (``step_timeout_s``) são decididos pelo ``MarchTracker``.
+    """
+    return FeatureGesture("walk", GestureKind.HOLD, params, _walking_signal)
 
 
 def sprint_gesture(params: GestureParams = DEFAULT_SPRINT_PARAMS) -> FeatureGesture:
-    """Gesto HOLD ``sprint`` sobre a cadência."""
-    raise NotImplementedError
+    """Gesto HOLD ``sprint`` (RF4): segura com a cadência ``f > f_on`` e solta com ``f < f_off``.
+
+    A feature é a cadência R1 (``f = 1/Δ̂``, passos/s) enquanto anda e ``0`` fora, então o fim
+    do ``walk`` derruba também o ``sprint`` (R5/R6: ``θ_on = f_on``, ``θ_off = f_off``).
+    """
+    return FeatureGesture("sprint", GestureKind.HOLD, params, _cadence_signal)

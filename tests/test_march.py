@@ -8,7 +8,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from inmotion.gestures.base import EventKind, GestureEvent
+from inmotion.gestures.base import EventKind, GestureEvent, GestureKind
 from inmotion.gestures.features import FrameContext
 from inmotion.gestures.march import (
     MarchParams,
@@ -24,8 +24,6 @@ DT = 1.0 / 30.0
 K_UP = 0.8  # joelho erguido (acima de theta_on = 0,30)
 PARAMS = MarchParams()
 L, R = Side.LEFT, Side.RIGHT
-
-NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 018 T1")
 
 
 def run_steps(
@@ -121,7 +119,6 @@ def _kinds(events: list[GestureEvent | None]) -> list[EventKind]:
     return [e.kind for e in events if e is not None]
 
 
-@NOT_YET
 def test_walk_gesture_follows_walking() -> None:
     gesture = walk_gesture()
     states = [MarchState(False, None, 0), MarchState(True, None, 2), MarchState(False, None, 0)]
@@ -129,7 +126,6 @@ def test_walk_gesture_follows_walking() -> None:
     assert _kinds(events) == [EventKind.START, EventKind.END]
 
 
-@NOT_YET
 def test_sprint_hysteresis_and_ends_with_walk() -> None:
     """CA4: cadência > f_on liga `sprint`; entre f_off e f_on mantém; < f_off ou fim do
     `walk` desliga."""
@@ -191,3 +187,18 @@ def test_cadence_stays_between_min_and_max_interval() -> None:
     cadence = trace[-1][1].cadence
     assert cadence is not None
     assert 1 / max(gaps) - 0.05 <= cadence <= 1 / min(gaps) + 0.05
+
+
+def test_walk_and_sprint_are_hold_gestures_named_after_the_profile() -> None:
+    assert walk_gesture().name == "walk"
+    assert sprint_gesture().name == "sprint"
+    assert walk_gesture().kind is GestureKind.HOLD
+    assert sprint_gesture().kind is GestureKind.HOLD
+
+
+def test_walk_without_march_state_stays_idle() -> None:
+    """Sem `ctx.march` (pipeline sem rastreador) a feature é 0: nunca anda."""
+    gesture = walk_gesture()
+    ctx = FrameContext(0.0, make_body(), None, None, None, None)
+    assert gesture.update(ctx) is None
+    assert gesture.feature_value == 0.0

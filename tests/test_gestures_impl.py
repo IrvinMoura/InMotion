@@ -248,10 +248,10 @@ def _lean_run(rig: Rig, lean_by_frame: dict[range, float], n: int) -> None:
 
 
 def test_forward_lean_holds_walk() -> None:
-    """RF5: tronco inclinado para frente (0,5 rad > 0,30) segura `walk` até endireitar."""
+    """RF5: tronco inclinado para frente (0,5 rad > 0,30) segura `lean` até endireitar."""
     rig = Rig([lean_gesture(LEAN, GEOMETRY)])
     _lean_run(rig, {range(30, 90): 0.5}, 120)
-    assert rig.kinds("walk") == [EventKind.START, EventKind.END]
+    assert rig.kinds("lean") == [EventKind.START, EventKind.END]
     start, end = rig.events
     assert 30 * DT < start.t <= 34 * DT  # N = 4 frames
     assert end.t == pytest.approx(90 * DT)
@@ -265,10 +265,10 @@ def test_upright_does_not_walk() -> None:
 
 
 def test_lean_hysteresis_holds_between_thresholds() -> None:
-    """Entre θ_off (0,20) e θ_on (0,30) o `walk` ativo continua."""
+    """Entre θ_off (0,20) e θ_on (0,30) o `lean` ativo continua."""
     rig = Rig([lean_gesture(LEAN, GEOMETRY)])
     _lean_run(rig, {range(10, 40): 0.5, range(40, 70): 0.25}, 100)
-    assert rig.kinds("walk") == [EventKind.START, EventKind.END]
+    assert rig.kinds("lean") == [EventKind.START, EventKind.END]
     assert rig.events[-1].t == pytest.approx(70 * DT)
 
 

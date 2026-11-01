@@ -40,7 +40,9 @@ filters:
 #   attack/use: alcance frontal r = (z_ombro - z_pulso)/(comprimento do braço), |r| <= 1 (A7/A8)
 #   jump:       (base - h)/s, em larguras de ombro (J1); trigger
 #   crouch:     c = (ȳ_ombros - base_ombros)/s, em larguras de ombro (crouch.feature abaixo)
-#   walk:       inclinação do tronco para frente, em rad (A9)
+#   walk:       marcha no lugar em curso (1 andando, 0 parado), spec 018
+#   sprint:     cadência da marcha, em passos/s (R1), spec 018
+#   lean:       inclinação do tronco para frente, em rad (A9); sem binding no Minecraft
 # direction: above ativa com f > theta_on e solta com f < theta_off (theta_on > theta_off).
 gestures:
   attack: {theta_on: 0.70, theta_off: 0.55, direction: above, debounce_frames: 3, cooldown_s: 0.0}
@@ -51,7 +53,12 @@ gestures:
   # mais folga ao ARMING com o quadril ainda visível (com 1,0: visibilidade mín 0,59).
   # Com crouch.feature: hip os valores antigos eram theta_on 0.35 e theta_off 0.25.
   crouch: {theta_on: 0.9,  theta_off: 0.6,  direction: above, debounce_frames: 4, cooldown_s: 0.0}
-  walk:   {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  lean:   {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  # walk e sprint (spec 018): sinais do MarchTracker; o início e o fim do andar vêm de
+  # march.min_steps e march.step_timeout_s. Valores iniciais da T0 de 01/11/2026.
+  walk:   {theta_on: 0.6,  theta_off: 0.4,  direction: above, debounce_frames: 1, cooldown_s: 0.0}
+  # sprint: marcha lenta 1,2-1,3 passos/s, rápida 2,0-2,6; f_on 1,8 e f_off 1,5.
+  sprint: {theta_on: 1.8,  theta_off: 1.5,  direction: above, debounce_frames: 1, cooldown_s: 0.0}
 
 # Sinal do agachar (spec 017 RF3): shoulders = queda dos ombros (continua visível sem o
 # quadril); hip = (h - base)/s, do quadril (spec 008). Ao trocar, ajuste gestures.crouch.
