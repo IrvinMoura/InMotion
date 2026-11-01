@@ -74,7 +74,8 @@ def default_steps(handedness: str) -> tuple[GuidedStep, ...]:
         GuidedStep("punch_other", f"3 SOCOS - BRACO {other}", 8.0, "use", 3),
         GuidedStep("jump", "3 PULOS", 8.0, "jump", 3),
         GuidedStep("crouch", "AGACHE E SEGURE", 6.0, "crouch", 1),
-        GuidedStep("lean", "INCLINE PARA FRENTE E SEGURE", 6.0, "walk", 1),
+        # spec 017: walk fora do perfil até a marcha (018); inclinar não pode apertar nada
+        GuidedStep("lean", "INCLINE PARA FRENTE (NADA DEVE APERTAR)", 6.0, None, 0),
         GuidedStep("rest_end", "FIQUE PARADO", 8.0, None, 0),
     )
 
@@ -382,6 +383,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--fullscreen", action="store_true", help="janela em tela cheia")
     parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="CAMINHO=VALOR",
+        help="sobrescreve a config (repetível), ex.: --set handedness=left",
+    )
+    parser.add_argument(
         "--script", choices=sorted(SCRIPTS), default="full", help="roteiro (crouch = spec 017 T7)"
     )
     return parser
@@ -407,7 +415,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from inmotion.vision.preprocess import Preprocessor
     from tools.record import compute_config_hash
 
-    config, profile = load_config(game=args.game)
+    config, profile = load_config(game=args.game, overrides=args.set)
     if profile is None:
         logger.error("perfil %r não encontrado", args.game)
         return 2
@@ -495,7 +503,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     result.safety_state, "SEM POSE"
                 )
                 canvas = render_frame(
-                    render(packet.image, result),
+                    render(packet.image, result, config.handedness),
                     schedule.steps[index].title,
                     remaining,
                     phase,

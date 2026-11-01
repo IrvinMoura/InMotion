@@ -76,7 +76,11 @@ def test_default_steps_follow_handedness() -> None:
     attack_l = next(s for s in left if s.gesture == "attack")
     assert "DIREITO" in attack_r.title
     assert "ESQUERDO" in attack_l.title
-    assert {s.gesture for s in right} >= {"attack", "use", "jump", "crouch", "walk", None}
+    assert {s.gesture for s in right} >= {"attack", "use", "jump", "crouch", None}
+    # spec 017: walk fora do perfil do Minecraft; inclinar não pode apertar nada
+    lean = next(s for s in right if s.label == "lean")
+    assert lean.gesture is None
+    assert lean.expected == 0
 
 
 def test_ascii_text_strips_accents_for_hershey() -> None:
@@ -158,3 +162,11 @@ def test_cli_accepts_script_choice() -> None:
 
     assert _build_parser().parse_args([]).script == "full"
     assert _build_parser().parse_args(["--script", "crouch"]).script == "crouch"
+
+
+def test_cli_set_overrides_are_repeatable() -> None:
+    from tools.guided import _build_parser
+
+    args = _build_parser().parse_args(["--set", "handedness=left", "--set", "camera.index=0"])
+    assert args.set == ["handedness=left", "camera.index=0"]
+    assert _build_parser().parse_args([]).set == []
