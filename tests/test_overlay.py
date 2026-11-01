@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from inmotion.overlay import render
+from inmotion.overlay import handedness_label, render
 from inmotion.pipeline import StepResult
 from inmotion.safety import SafetyState
 from tests.fakes import make_pose
@@ -70,3 +70,25 @@ def test_render_draws_exit_zone_with_progress() -> None:
     zone = (slice(60, 120), slice(0, 80))  # [y0·H, y1·H) × [x0·W, x1·W)
     assert idle[zone].any()  # contorno do bloco
     assert half[zone].sum() > idle[zone].sum()  # barra de progresso preenchida
+
+
+def test_handedness_label_names_the_mode_and_the_attacking_arm() -> None:
+    """Spec 017 RF6: o texto diz Destro/Canhoto e qual braço ataca (ASCII: Hershey)."""
+    assert handedness_label("right") == "Destro - ataca: braco direito"
+    assert handedness_label("left") == "Canhoto - ataca: braco esquerdo"
+    for text in (handedness_label("right"), handedness_label("left")):
+        assert text.isascii()
+
+
+def test_shows_handedness_label() -> None:
+    """Sem lateralidade nada é desenhado na linha nova; com ela, cada modo tem o seu texto."""
+    res = StepResult(t=0.0, fps=30.0, safety_state=SafetyState.ACTIVE, pose=None)
+    row = (slice(52, 76), slice(0, SIZE[0]))  # abaixo do FPS (y = 20) e do estado (y = 42)
+    plain = render(blank(), res)
+    left = render(blank(), res, "left")
+    right = render(blank(), res, "right")
+    assert not plain[row].any()
+    assert left[row].any()
+    assert right[row].any()
+    assert not np.array_equal(left[row], right[row])
+    assert np.array_equal(plain[:52], left[:52])  # o resto do quadro não muda

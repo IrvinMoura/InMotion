@@ -21,6 +21,7 @@ from inmotion.filters.ema import Ema
 from inmotion.filters.one_euro import OneEuro
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
+from inmotion.gestures.arbiter import ArbiterConfig
 from inmotion.gestures.base import GestureKind
 from inmotion.gestures.factory import build_body_gestures
 from inmotion.input.backend import HotkeySource, InputBackend
@@ -46,7 +47,8 @@ WINDOW_NAME = "InMotion"
 _THREAD_JOIN_S = 1.0
 
 # Perfil usado quando não há ``--game``: o do Minecraft (usuário destro: ataque = braço
-# direito, botão esquerdo; usar item = braço esquerdo, botão direito). Um teste confere que
+# direito, botão esquerdo; usar item = braço esquerdo, botão direito; spec 017: sem ``walk``
+# até a marcha da spec 018, e agachar vence o pulo). Um teste confere que
 # é igual a ``config/games/minecraft.yaml``.
 DEFAULT_PROFILE = GameProfile(
     "minecraft",
@@ -55,8 +57,12 @@ DEFAULT_PROFILE = GameProfile(
         "use": Binding("mouse_right", GestureKind.HOLD),
         "jump": Binding("space", GestureKind.TRIGGER),
         "crouch": Binding("shift", GestureKind.HOLD),
-        "walk": Binding("w", GestureKind.HOLD),
     },
+    ArbiterConfig(
+        priority=("both_arms", "crouch", "jump", "attack", "use"),
+        exclusive=(frozenset({"crouch", "jump"}),),
+        combos={"both_arms": frozenset({"attack", "use"})},
+    ),
 )
 
 
@@ -97,12 +103,13 @@ class AppDeps:
 class OpenCvDisplay:
     """``Display`` sobre ``cv2.imshow``: desenha o overlay e detecta a janela fechada."""
 
-    def __init__(self, window_name: str = WINDOW_NAME) -> None:
+    def __init__(self, window_name: str = WINDOW_NAME, handedness: str | None = None) -> None:
         self._name = window_name
+        self._handedness = handedness  # "right" | "left": o overlay mostra o modo (spec 017)
 
     def show(self, image: NDArray[np.uint8], result: StepResult) -> bool:
         """Mostra o frame com overlay; False se a janela foi fechada."""
-        cv2.imshow(self._name, render(image, result))
+        cv2.imshow(self._name, render(image, result, self._handedness))
         cv2.waitKey(1)
         return bool(cv2.getWindowProperty(self._name, cv2.WND_PROP_VISIBLE) >= 1)
 

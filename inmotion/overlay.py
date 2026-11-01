@@ -24,6 +24,13 @@ _POINT_COLOR = (0, 255, 255)
 _POINT_RADIUS = 3
 _TEXT_ORIGIN_FPS = (8, 20)
 _TEXT_ORIGIN_STATE = (8, 42)
+_TEXT_ORIGIN_HAND = (8, 64)
+_HAND_TEXT_SCALE = 0.5
+_HAND_COLOR = (255, 255, 0)
+_HAND_TEXT = {
+    "right": "Destro - ataca: braco direito",
+    "left": "Canhoto - ataca: braco esquerdo",
+}
 _TEXT_SCALE = 0.6
 _ZONE_IDLE_COLOR = (0, 165, 255)  # laranja (BGR): visível em parede clara
 _ZONE_ACTIVE_COLOR = (0, 0, 255)
@@ -49,8 +56,19 @@ def _draw_exit_zone(out: NDArray[np.uint8], zone: ExitZoneState) -> None:
     cv2.putText(out, label, origin, _FONT, _ZONE_TEXT_SCALE, color, 1)
 
 
-def render(img: NDArray[np.uint8], result: StepResult) -> NDArray[np.uint8]:
+def handedness_label(handedness: str) -> str:
+    """Texto do modo (spec 017 RF6): "Destro"/"Canhoto" e o braço que ataca (ASCII, Hershey)."""
+    return _HAND_TEXT[handedness]
+
+
+def render(
+    img: NDArray[np.uint8], result: StepResult, handedness: str | None = None
+) -> NDArray[np.uint8]:
     """Devolve uma cópia de ``img`` com FPS, estado de segurança e pontos da pose.
+
+    ``handedness`` (``"right"``/``"left"``, da config; ``None`` omite) acrescenta o modo
+    destro/canhoto e o braço que ataca. Vem por parâmetro e não pelo ``StepResult`` porque é
+    configuração fixa da sessão, não resultado do frame; o overlay continua só lendo.
 
     Os pontos usam A5 inversa: ``p = diag(W, H)·n``, com (W, H) o tamanho de ``img``.
     Nem ``img`` nem ``result`` são alterados.
@@ -69,4 +87,7 @@ def render(img: NDArray[np.uint8], result: StepResult) -> NDArray[np.uint8]:
         _draw_exit_zone(out, result.exit_zone)
     label, color = _STATE_TEXT[result.safety_state]
     cv2.putText(out, label, _TEXT_ORIGIN_STATE, _FONT, _TEXT_SCALE, color, 2)
+    if handedness is not None:
+        text = handedness_label(handedness)
+        cv2.putText(out, text, _TEXT_ORIGIN_HAND, _FONT, _HAND_TEXT_SCALE, _HAND_COLOR, 1)
     return out

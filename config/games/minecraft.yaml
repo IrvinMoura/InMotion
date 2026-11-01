@@ -1,13 +1,40 @@
-# Perfil do Minecraft (specs 004/008): gesto -> input.
+# Perfil do Minecraft (specs 004/008/017): gesto -> input.
 # kind: hold (segura enquanto o gesto dura) | trigger (um toque de duração mapper.tap_hold_s)
 #       | analog.
-# attack = braço dominante (handedness) esticado para a câmera; use = o outro braço;
-# jump = pulo (tap de espaço); crouch = agachar; walk = inclinar o tronco para frente.
+#
+# Mapa de controles (spec 017); só os gestos que existem hoje têm binding abaixo:
+#   atacar / quebrar   braço dominante esticado para a câmera      mouse_left   hold     008
+#   usar / colocar     braço não dominante esticado                mouse_right  hold     008
+#   pular              subida do quadril (J1)                      space        trigger  008
+#   agachar            ombros abaixo da base calibrada             shift        hold     017
+#   andar / correr     marcha no lugar                             w / ctrl+w            018 (futuro)
+#   andar p/ trás e    inclinar o tronco para trás / para o lado   s / a / d            019 (futuro)
+#     para os lados
+#   câmera             cabeça, em controle de velocidade           mouse X/Y             014 (futuro)
+#   hotbar, inventário, soltar, trocar de mão (voz)                1-9 / e / q / f       020 (futuro)
+#   pausar / sair      teclado                                     F8 / F9               001
 # Os dois braços esticados juntos só suprimem os cliques (combo both_arms).
+#
+# Modo canhoto: `--set handedness=left` (ou `handedness: left` no perfil do usuário) troca
+# os braços: o esquerdo ataca (mouse_left) e o direito usa (mouse_right).
+#
+# `walk` (inclinar o tronco) saiu do perfil: a inclinação parado já passa do limiar e deixava
+# `w` apertado. O gesto continua no código e um perfil pode ligá-lo; a marcha é a spec 018.
 name: minecraft
 bindings:
   attack: {input: mouse_left,  kind: hold}
   use:    {input: mouse_right, kind: hold}
   jump:   {input: space,       kind: trigger}
   crouch: {input: shift,       kind: hold}
-  walk:   {input: w,           kind: hold}
+
+# Prioridades (spec 017 RF2): antes = mais forte. Quem é mais forte suprime o mais fraco só
+# dentro de um grupo exclusivo; fora deles os gestos convivem. O combo suprime os membros.
+# Só gestos que existem entram aqui (nome desconhecido é erro); as specs 018/019 acrescentam
+# sprint, walk_back e strafe_* à prioridade e aos grupos [crouch, walk, ...] quando criarem
+# os gestos.
+arbiter:
+  priority: [both_arms, crouch, jump, attack, use]
+  exclusive:
+    - [crouch, jump]
+  combos:
+    both_arms: [attack, use]

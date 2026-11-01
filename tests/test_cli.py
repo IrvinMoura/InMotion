@@ -104,3 +104,37 @@ def test_valid_profile_reaches_model_check(tmp_path: Path) -> None:
     proc = _run_cli("--game", "minecraft", "--model-dir", str(tmp_path), "--no-overlay")
     assert proc.returncode == 2
     assert "download_model.py" in proc.stdout + proc.stderr
+
+
+def test_set_handedness_left_swaps_arms() -> None:
+    """CA9: ``--set handedness=left``: o braço esquerdo gera ``mouse_left`` e o direito
+    ``mouse_right``; sem a opção é o contrário (destro)."""
+    from inmotion.__main__ import build_parser, resolve_config
+    from inmotion.fps import FpsMeter
+    from inmotion.gestures.factory import build_body_gestures
+    from inmotion.input.backend import MOUSE_BUTTONS
+    from inmotion.pipeline import Pipeline
+    from inmotion.safety import SafetyConfig, SafetyManager, TrackedInput
+    from inmotion.vision.landmarks import Side
+    from tests.fakes import FakeInputBackend
+    from tests.helpers import ARM_STRAIGHT_FORWARD, make_body
+
+    def pressed_by(handedness_args: list[str], **arm: object) -> set[str]:
+        args = build_parser().parse_args(["--game", "minecraft", *handedness_args])
+        config, profile = resolve_config(args)
+        assert profile is not None
+        fake = FakeInputBackend()
+        safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(min_track_s=0.0))
+        gestures = build_body_gestures(
+            profile.bindings, Side(config.handedness), config.gestures, config.geometry
+        )
+        pipeline = Pipeline(safety, gestures, FpsMeter(window=30), profile=profile)
+        for i in range(10):
+            pipeline.step(make_body(t=i / 30, **arm), i / 30)  # type: ignore[arg-type]
+        return set(fake.pressed)
+
+    left = ["--set", "handedness=left"]
+    assert pressed_by(left, left_arm=ARM_STRAIGHT_FORWARD) == {"mouse_left"}
+    assert pressed_by(left, right_arm=ARM_STRAIGHT_FORWARD) == {"mouse_right"}
+    assert pressed_by([], right_arm=ARM_STRAIGHT_FORWARD) == {"mouse_left"}
+    assert pressed_by([], left_arm=ARM_STRAIGHT_FORWARD) == {"mouse_right"}

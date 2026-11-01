@@ -171,7 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             backend=backend,
             hotkeys=WindowsHotkeys(frozenset({safety_config.pause_key, safety_config.exit_key})),
             clock=clock,
-            display=OpenCvDisplay() if config.overlay.enabled else None,
+            display=OpenCvDisplay(handedness=config.handedness) if config.overlay.enabled else None,
             pose_filter=pose_filter_from_config(config.filters),
             exit_zone=config.exit_zone,
             config=config,
