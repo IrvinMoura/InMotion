@@ -57,8 +57,9 @@ gestures:
   # walk e sprint (spec 018): sinais do MarchTracker; o início e o fim do andar vêm de
   # march.min_steps e march.step_timeout_s. Valores iniciais da T0 de 01/11/2026.
   walk:   {theta_on: 0.6,  theta_off: 0.4,  direction: above, debounce_frames: 1, cooldown_s: 0.0}
-  # sprint: marcha lenta 1,2-1,3 passos/s, rápida 2,0-2,6; f_on 1,8 e f_off 1,5.
-  sprint: {theta_on: 1.8,  theta_off: 1.5,  direction: above, debounce_frames: 1, cooldown_s: 0.0}
+  # sprint (T6): com cadence_alpha 0,3 a marcha lenta chega a 1,68 passos/s e a rápida passa
+  # de 2,0 (sessões de 01/11/2026); f_on 2,0 (1,19x a lenta) e f_off 1,7.
+  sprint: {theta_on: 2.0,  theta_off: 1.7,  direction: above, debounce_frames: 1, cooldown_s: 0.0}
 
 # Sinal do agachar (spec 017 RF3): shoulders = queda dos ombros (continua visível sem o
 # quadril); hip = (h - base)/s, do quadril (spec 008). Ao trocar, ajuste gestures.crouch.
@@ -88,8 +89,12 @@ baseline:
 march:
   min_steps: 2
   step_timeout_s: 1.2
-  cadence_alpha: 0.5
+  cadence_alpha: 0.3   # T6: com 0,5 a marcha lenta passava de 1,8 passos/s (ctrl falso)
   step: {theta_on: 0.30, theta_off: 0.15, direction: above, debounce_frames: 1, cooldown_s: 0.0}
+  # Portão do pulo (RF6b): sem pulo por este tempo depois de um joelho erguido. O quique do
+  # quadril vem logo após o joelho descer; 0,3 s ainda deixava 1 pulo falso a 1,5 m e 0,5 s
+  # zerou, mantendo os 3 pulos reais de todas as sessões (T6, 01/11/2026).
+  jump_gate_hold_s: 0.5
 
 # ActionMapper: duração do tap de um gesto trigger (> 1 tick de 50 ms do Minecraft).
 mapper:

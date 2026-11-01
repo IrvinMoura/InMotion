@@ -13,9 +13,12 @@ DEFAULT_JUMP_PARAMS = GestureParams(0.25, 0.15, Direction.ABOVE, debounce_frames
 
 
 def _gated_jump_height(knee_gate: float) -> Callable[[FrameContext], float | None]:
-    """RF6b (018): ``j`` vale ``0`` enquanto algum joelho tem ``k > knee_gate``."""
+    """RF6b (018): ``j`` vale ``0`` enquanto algum joelho tem ``k > knee_gate`` ou teve há
+    menos de ``jump_gate_hold_s`` (``ctx.march.knee_lifted_recently``)."""
 
     def feature(ctx: FrameContext) -> float | None:
+        if ctx.march is not None and ctx.march.knee_lifted_recently:
+            return 0.0
         for side in (Side.LEFT, Side.RIGHT):
             k = knee_lift(ctx, side)
             if k is not None and k > knee_gate:

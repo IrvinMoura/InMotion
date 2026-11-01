@@ -129,11 +129,18 @@ def test_walk_gesture_follows_walking() -> None:
 def test_sprint_hysteresis_and_ends_with_walk() -> None:
     """CA4: cadência > f_on liga `sprint`; entre f_off e f_on mantém; < f_off ou fim do
     `walk` desliga."""
+    from inmotion.gestures.march import DEFAULT_SPRINT_PARAMS
+
     gesture = sprint_gesture()
-    walking = [MarchState(True, f, 4) for f in (1.2, 2.2, 1.6, 1.4, 2.0)]
+    on, off = DEFAULT_SPRINT_PARAMS.theta_on, DEFAULT_SPRINT_PARAMS.theta_off
+    # abaixo de f_off, acima de f_on, entre os dois (mantém), abaixo de f_off, acima de f_on
+    cadences = (off - 0.3, on + 0.2, (on + off) / 2, off - 0.1, on + 0.1)
+    walking = [MarchState(True, f, 4) for f in cadences]
     events = [gesture.update(_ctx(i * DT, s)) for i, s in enumerate(walking)]
     assert _kinds(events) == [EventKind.START, EventKind.END, EventKind.START]
-    assert gesture.update(_ctx(1.0, MarchState(False, 2.0, 0))) is not None  # fim do walk -> END
+    assert (
+        gesture.update(_ctx(1.0, MarchState(False, on + 0.1, 0))) is not None
+    )  # fim do walk -> END
 
 
 def test_both_knees_up_is_not_a_step() -> None:
@@ -202,3 +209,45 @@ def test_walk_without_march_state_stays_idle() -> None:
     ctx = FrameContext(0.0, make_body(), None, None, None, None)
     assert gesture.update(ctx) is None
     assert gesture.feature_value == 0.0
+
+
+# --- Spec 018 T6 (dados da T0): correções achadas no replay das sessões de marcha ---
+
+
+def test_invisible_other_knee_does_not_allow_a_step() -> None:
+    """Agachado, o joelho de trás some (vis ~0,06). `None` no outro joelho não pode valer
+    como "abaixado": no replay a 2 m isso gerava `w` durante o agachar."""
+    tracker = MarchTracker(MarchParams())
+    t = 0.0
+    for k_left, k_right in [(0.0, None), (0.6, None), (0.0, None), (None, 0.6), (None, 0.0)] * 3:
+        tracker.update(k_left, k_right, t)
+        t += 0.3
+    assert tracker.state.steps == 0
+    assert not tracker.state.walking
+
+
+def test_knee_lifted_recently_holds_for_gate_hold() -> None:
+    """RF6b com memória: o quique do quadril vem logo depois de o joelho descer."""
+    tracker = MarchTracker(MarchParams(jump_gate_hold_s=0.5))
+    assert not tracker.update(0.0, 0.0, 0.0).knee_lifted_recently
+    assert tracker.update(0.6, 0.0, 0.1).knee_lifted_recently
+    assert tracker.update(0.0, 0.0, 0.4).knee_lifted_recently  # 0,3 s depois: ainda
+    assert not tracker.update(0.0, 0.0, 0.7).knee_lifted_recently  # 0,6 s depois: livre
+    tracker.reset()
+    assert not tracker.state.knee_lifted_recently
+
+
+def test_t6_defaults_from_t0_data() -> None:
+    params = MarchParams()
+    assert params.cadence_alpha == pytest.approx(0.3)
+    assert params.jump_gate_hold_s == pytest.approx(0.5)
+
+
+def test_jump_feature_is_zero_while_knee_lifted_recently() -> None:
+    from inmotion.gestures.jump import jump_gesture
+
+    gesture = jump_gesture(knee_gate=0.30)
+    gesture.update(_ctx(0.0, MarchState(True, None, 2, knee_lifted_recently=True)))
+    assert gesture.feature_value == 0.0
+    gesture.update(_ctx(DT, MarchState(True, None, 2, knee_lifted_recently=False)))
+    assert gesture.feature_value is None  # sem esqueleto no contexto: volta ao j normal

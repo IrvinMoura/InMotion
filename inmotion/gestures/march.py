@@ -22,16 +22,19 @@ from inmotion.vision.landmarks import Side
 # Passo (spec 018 T0): k parado <= 0,08, no pulo <= 0,14, marchando p95 >= 0,38.
 DEFAULT_STEP_PARAMS = GestureParams(0.30, 0.15, Direction.ABOVE, debounce_frames=1)
 DEFAULT_WALK_PARAMS = GestureParams(0.6, 0.4, Direction.ABOVE, debounce_frames=1)
-DEFAULT_SPRINT_PARAMS = GestureParams(1.8, 1.5, Direction.ABOVE, debounce_frames=1)
+# Correr (T6): com α = 0,3 a marcha lenta chega a 1,68 passos/s e a rápida passa de 2,0.
+DEFAULT_SPRINT_PARAMS = GestureParams(2.0, 1.7, Direction.ABOVE, debounce_frames=1)
 
 
 @dataclass(frozen=True)
 class MarchParams:
-    """Parâmetros da marcha: passos para começar, prazo entre passos, α da EMA (R1), passo."""
+    """Parâmetros da marcha: passos para começar, prazo entre passos, α da EMA (R1), passo
+    e a memória do portão do pulo (``jump_gate_hold_s``, RF6b)."""
 
     min_steps: int = 2
     step_timeout_s: float = 1.2
-    cadence_alpha: float = 0.5
+    cadence_alpha: float = 0.3
+    jump_gate_hold_s: float = 0.5
     step: GestureParams = field(default_factory=lambda: DEFAULT_STEP_PARAMS)
 
     def __post_init__(self) -> None:
@@ -41,17 +44,21 @@ class MarchParams:
             raise ValueError("step_timeout_s deve ser finito e > 0")
         if not (math.isfinite(self.cadence_alpha) and 0.0 < self.cadence_alpha <= 1.0):
             raise ValueError("cadence_alpha deve estar em (0, 1]")
+        if not (math.isfinite(self.jump_gate_hold_s) and self.jump_gate_hold_s >= 0.0):
+            raise ValueError("jump_gate_hold_s deve ser finito e >= 0")
         if self.step.direction is not Direction.ABOVE:
             raise ValueError("step deve ter direction ABOVE (o joelho sobe com k > theta_on)")
 
 
 @dataclass(frozen=True)
 class MarchState:
-    """Estado da marcha num frame: andando, cadência (passos/s) e passos da sequência."""
+    """Estado da marcha num frame: andando, cadência (passos/s), passos da sequência e se
+    algum joelho esteve erguido nos últimos ``jump_gate_hold_s`` (portão do pulo, RF6b)."""
 
     walking: bool
     cadence: float | None
     steps: int
+    knee_lifted_recently: bool = False
 
 
 class MarchTracker:
@@ -60,8 +67,12 @@ class MarchTracker:
     Cada joelho tem um ``Gesture`` TRIGGER (R5/R6) sobre ``k``: cada PULSE é um passo do
     lado. Regras:
 
-    - **Outro joelho abaixado:** um passo só conta se ``k_outro < θ_on`` (no agachar os dois
-      joelhos sobem juntos e isso não é passo).
+    - **Outro joelho abaixado:** um passo só conta se o outro joelho estiver **visível** e
+      com ``k_outro < θ_on``. No agachar os dois joelhos sobem juntos e o de trás some
+      (visibilidade ~0,06); tratar ``None`` como abaixado gerava ``w`` agachado (T6).
+    - **Joelho erguido recente (RF6b):** ``knee_lifted_recently`` vale enquanto algum ``k``
+      passou de ``θ_on`` há menos de ``jump_gate_hold_s``; o quique do quadril na marcha
+      vem logo depois de o joelho descer (T6: 0,5 s zera os pulos falsos do replay).
     - **Começar (RF3):** ``min_steps`` passos de lados alternados, cada um a no máximo
       ``step_timeout_s`` do anterior. Dois passos seguidos do mesmo lado reiniciam a
       sequência (M2: ficar num pé só nunca anda).
@@ -81,6 +92,8 @@ class MarchTracker:
             Side.LEFT: Gesture("step_left", GestureKind.TRIGGER, params.step),
             Side.RIGHT: Gesture("step_right", GestureKind.TRIGGER, params.step),
         }
+        self._last_lift_t: float | None = None  # último quadro com algum joelho erguido
+        self._now = 0.0
         self._clear()
 
     def _clear(self) -> None:
@@ -95,9 +108,12 @@ class MarchTracker:
         if self._last_t is not None and t - self._last_t > self._params.step_timeout_s:
             self._clear()  # M3: sem passo por step_timeout_s, para
         on = self._params.step.theta_on
-        # O outro joelho tem de estar abaixado (None = não visível = não erguido).
-        gated_left = k_left if k_right is None or k_right < on else None
-        gated_right = k_right if k_left is None or k_left < on else None
+        if any(k is not None and k > on for k in (k_left, k_right)):
+            self._last_lift_t = t
+        self._now = t
+        # O outro joelho tem de estar visível e abaixado (None não vale como abaixado).
+        gated_left = k_left if k_right is not None and k_right < on else None
+        gated_right = k_right if k_left is not None and k_left < on else None
         for side, k in ((Side.LEFT, gated_left), (Side.RIGHT, gated_right)):
             event = self._gestures[side].update(k, t)
             if event is not None and event.kind is EventKind.PULSE:
@@ -109,7 +125,9 @@ class MarchTracker:
         """Estado atual: andando, cadência ``f = 1/Δ̂`` (``None`` sem intervalos) e passos."""
         interval = self._interval
         cadence = 1.0 / interval if interval is not None and interval > 0.0 else None
-        return MarchState(self._walking, cadence, self._steps)
+        last = self._last_lift_t
+        recent = last is not None and self._now - last < self._params.jump_gate_hold_s
+        return MarchState(self._walking, cadence, self._steps, recent)
 
     def _on_step(self, side: Side, t: float) -> None:
         if self._last_t is None:
@@ -138,6 +156,7 @@ class MarchTracker:
         """Esquece passos, andar e cadência SEM evento (o ``SafetyManager`` já soltou)."""
         for gesture in self._gestures.values():
             gesture.reset()
+        self._last_lift_t = None
         self._clear()
 
 
