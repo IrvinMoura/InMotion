@@ -38,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NOME",
         help="perfil de jogo em config/games/NOME.yaml (ex.: minecraft)",
     )
+    parser.add_argument("--profile", type=Path, help="YAML do usuário, aplicado após o jogo")
     parser.add_argument(
         "--set",
         action="append",
@@ -97,6 +98,7 @@ def resolve_config(args: argparse.Namespace) -> tuple[AppConfig, GameProfile | N
     return load_config(
         default_path=args.config,
         game=args.game,
+        profile_path=args.profile,
         overrides=[*flag_overrides(args), *args.overrides],
     )
 
@@ -135,22 +137,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     from inmotion.gestures.factory import BODY_GESTURE_NAMES
     from inmotion.input.hotkeys import WindowsHotkeys
     from inmotion.input.keyboard_mouse import KeyboardMouseBackend
+    from inmotion.session import DEFAULT_PROFILE
     from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError
     from inmotion.vision.preprocess import Preprocessor
 
     safety_config = config.safety
-    backend = KeyboardMouseBackend()
-    if profile is not None:
-        try:
-            validate_profile(profile, BODY_GESTURE_NAMES, backend.supported_keys())
-        except ConfigError as exc:
-            _log.error("Perfil de jogo inválido: %s", exc)
-            return EXIT_USAGE
-        _log.info("Perfil de jogo: %s", profile.name)
+    profile = profile if profile is not None else DEFAULT_PROFILE
+    try:
+        backend = KeyboardMouseBackend()
+        hotkeys = WindowsHotkeys(frozenset({safety_config.pause_key, safety_config.exit_key}))
+        validate_profile(profile, BODY_GESTURE_NAMES, backend.supported_keys())
+        for gesture, binding in profile.bindings.items():
+            if binding.input in {safety_config.pause_key, safety_config.exit_key}:
+                raise ConfigError(
+                    f"bindings.{gesture}.input", "conflita com uma tecla de segurança"
+                )
+    except (ValueError, OSError) as exc:
+        _log.error("Configuração de input inválida: %s", exc)
+        return EXIT_USAGE
+    _log.info("Perfil de jogo: %s", profile.name)
     # O modelo é checado ANTES de abrir a câmera: sem ele, nada de hardware é tocado.
     try:
         estimator = MediaPipePoseEstimator(config.pose)
-    except ModelNotFoundError as exc:
+    except (ModelNotFoundError, RuntimeError, ValueError, OSError) as exc:
         _log.error("%s", exc)
         return EXIT_USAGE
 
@@ -158,10 +167,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     camera = Camera(config.camera, clock)
     try:
         camera.start()
-    except OSError as exc:
-        estimator.close()
-        _log.error("%s", exc)
-        return EXIT_USAGE
+    except BaseException as exc:
+        try:
+            camera.close()
+        finally:
+            estimator.close()
+        if isinstance(exc, OSError | ValueError | RuntimeError):
+            _log.error("Falha ao abrir a câmera: %s", exc)
+            return EXIT_USAGE
+        if isinstance(exc, KeyboardInterrupt):
+            return 0
+        raise
     _log.info("Câmera aberta: %dx%d a %.0f FPS", *camera.actual)
 
     try:
@@ -169,7 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             source=camera,
             estimator=estimator,
             backend=backend,
-            hotkeys=WindowsHotkeys(frozenset({safety_config.pause_key, safety_config.exit_key})),
+            hotkeys=hotkeys,
             clock=clock,
             display=OpenCvDisplay(handedness=config.handedness) if config.overlay.enabled else None,
             pose_filter=pose_filter_from_config(config.filters),
@@ -177,15 +193,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             config=config,
             preprocess=Preprocessor(config.preprocess).apply,
         )
-        if profile is not None:
-            deps.profile = profile
+        deps.profile = profile
     except BaseException:
         # Falhou antes do run(): quem fecha a câmera e o estimador somos nós.
         camera.close()
         estimator.close()
         raise
     _log.info("Rodando: %s pausa/retoma, %s sai.", safety_config.pause_key, safety_config.exit_key)
-    return run(deps, safety_config)
+    try:
+        return run(deps, safety_config)
+    except KeyboardInterrupt:
+        _log.info("Sessão encerrada pelo teclado")
+        return 0
+    except Exception:
+        _log.exception("Falha durante a sessão")
+        return 1
 
 
 if __name__ == "__main__":

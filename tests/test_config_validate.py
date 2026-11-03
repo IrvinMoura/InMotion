@@ -436,6 +436,30 @@ def test_arbiter_rejects_combo_missing_from_priority() -> None:
     assert "priority" in exc.value.message
 
 
+def test_profile_rejects_multiple_formed_combos() -> None:
+    profile = build(
+        GameProfile,
+        {
+            "name": "multiple",
+            "bindings": {
+                "jump": {"input": "space", "kind": "trigger"},
+                "attack": {"input": "mouse_left", "kind": "hold"},
+                "use": {"input": "mouse_right", "kind": "hold"},
+            },
+            "arbiter": {
+                "priority": ["first", "second", "attack", "use", "jump"],
+                "combos": {"first": ["attack", "use"], "second": ["attack", "jump"]},
+            },
+        },
+    )
+    with pytest.raises(ConfigError, match="só um combo"):
+        validate_profile(
+            profile,
+            frozenset({"attack", "use", "jump"}),
+            frozenset({"mouse_left", "mouse_right", "space"}),
+        )
+
+
 def test_arbiter_wrong_types_are_config_errors() -> None:
     with pytest.raises(ConfigError) as exc:
         _arbiter_profile({"priority": "jump"})

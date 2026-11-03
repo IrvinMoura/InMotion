@@ -128,6 +128,44 @@ def test_gestures_reset_when_resuming_from_pause() -> None:
     assert spy.resets == 1
 
 
+def test_watchdog_between_steps_resets_and_represses_held_gesture() -> None:
+    spy = SpyGesture()
+    pipeline, safety, fake = make_pipeline(spy)
+    pipeline.step(make_pose({}, t=0.0), 0.0)
+    assert fake.pressed == {"space"}
+    safety.on_stall()
+    assert not fake.pressed
+    result = pipeline.step(make_pose({}, t=1.0), 1.0)
+    assert spy.resets == 1
+    assert result.pressed == frozenset({"space"})
+    assert fake.events.count(("press", "space")) == 2
+
+
+def test_pause_and_resume_between_steps_still_resets_gestures() -> None:
+    spy = SpyGesture()
+    pipeline, safety, fake = make_pipeline(spy)
+    pipeline.step(make_pose({}, t=0.0), 0.0)
+    safety.on_hotkeys(frozenset({"f8"}))
+    safety.on_hotkeys(frozenset())
+    safety.on_hotkeys(frozenset({"f8"}))
+    pipeline.step(make_pose({}, t=0.1), 0.1)
+    assert spy.resets == 1
+    assert fake.pressed == {"space"}
+
+
+def test_watchdog_requires_continuous_tracking_again() -> None:
+    spy = SpyGesture()
+    pipeline, safety, fake = build([spy], config=SafetyConfig(min_track_s=0.1))
+    pipeline.step(make_pose({}, t=0.0), 0.0)
+    pipeline.step(make_pose({}, t=0.11), 0.11)
+    assert fake.pressed == {"space"}
+    safety.on_stall()
+    pipeline.step(make_pose({}, t=1.0), 1.0)
+    assert fake.pressed == set()
+    pipeline.step(make_pose({}, t=1.11), 1.11)
+    assert fake.pressed == {"space"}
+
+
 def test_step_result_carries_t_pose_and_fps() -> None:
     spy = SpyGesture()
     pipeline, _, _ = make_pipeline(spy)

@@ -100,7 +100,8 @@ class TrackedInput:
 
     @property
     def enabled(self) -> bool:
-        return self._enabled
+        with self._lock:
+            return self._enabled
 
     def set_enabled(self, enabled: bool) -> None:
         """Desabilitado, ``press`` é ignorado; ``release`` continua funcionando."""
@@ -111,8 +112,10 @@ class TrackedInput:
         with self._lock:
             if not self._enabled or key in self._pressed:
                 return
-            self._backend.press(key)
+            # Uma falha pode ocorrer depois de o backend enviar o comando.
+            # Registrar antes garante uma tentativa de soltura no guard().
             self._pressed.add(key)
+            self._backend.press(key)
 
     def release(self, key: KeyName) -> None:
         with self._lock:
@@ -162,6 +165,8 @@ class SafetyManager:
         self._lost = False
         self._paused = False
         self._previous_keys: frozenset[KeyName] = frozenset()
+        self._generation = 0
+        self._stall_generation = 0
         # Reentrante: o watchdog chama ``on_stall`` de outra thread.
         self._lock = threading.RLock()
 
@@ -176,6 +181,18 @@ class SafetyManager:
     @property
     def config(self) -> SafetyConfig:
         return self._config
+
+    @property
+    def generation(self) -> int:
+        """Muda quando o input é invalidado, mesmo entre dois passos do pipeline."""
+        with self._lock:
+            return self._generation
+
+    @property
+    def stall_generation(self) -> int:
+        """Interrupções que exigem rastrear a pose continuamente outra vez."""
+        with self._lock:
+            return self._stall_generation
 
     @property
     def input(self) -> TrackedInput:
@@ -212,6 +229,7 @@ class SafetyManager:
                 self._last_ok_t = t
             if not self._lost and t - self._last_ok_t >= self._config.lost_timeout_s:
                 self._lost = True
+                self._generation += 1
                 self._sync_enabled()  # antes de soltar: nenhum press entra no meio
                 self._tracked.release_all()
 
@@ -219,6 +237,8 @@ class SafetyManager:
         """Loop travado (watchdog): solta tudo e desabilita até o próximo ``on_frame``."""
         with self._lock:
             self._lost = True
+            self._generation += 1
+            self._stall_generation += 1
             self._sync_enabled()  # antes de soltar: nenhum press entra no meio
             self._tracked.release_all()
 
@@ -236,6 +256,7 @@ class SafetyManager:
                 self._paused = not self._paused
                 self._sync_enabled()
                 if self._paused:
+                    self._generation += 1
                     self._tracked.release_all()
 
             return SafetyAction.EXIT if self._config.exit_key in rising else SafetyAction.NONE

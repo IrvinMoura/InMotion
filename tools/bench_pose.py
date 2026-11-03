@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -70,17 +71,23 @@ def bench_variant(
     warmup_frames: int = WARMUP_FRAMES,
 ) -> BenchResult:
     """Processa frames por ``duration_s`` (após o aquecimento) e mede FPS e inferência."""
-    if duration_s <= 0:
+    if not math.isfinite(duration_s) or duration_s <= 0:
         raise ValueError(f"duration_s deve ser > 0: {duration_s}")
+    if warmup_frames < 0:
+        raise ValueError("warmup_frames deve ser >= 0")
     infer_ms: list[float] = []
     detected = 0
     warm = 0
     start: float | None = None
     end = 0.0
+    last_frame_t = clock.now()
     while start is None or clock.now() - start < duration_s:
         packet = source.read(READ_TIMEOUT_S)
         if packet is None:
+            if clock.now() - last_frame_t >= 5.0:
+                raise OSError("nenhum frame recebido por 5 s durante o benchmark")
             continue
+        last_frame_t = clock.now()
         before = clock.now()
         pose = estimator.estimate(packet.image, packet.t)
         after = clock.now()

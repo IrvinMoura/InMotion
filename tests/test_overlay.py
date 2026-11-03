@@ -35,6 +35,19 @@ def test_render_without_pose() -> None:
     assert out.any()  # o texto de estado foi desenhado
 
 
+def test_overlay_ignores_missing_and_out_of_frame_coordinates() -> None:
+    from dataclasses import replace
+
+    result = result_with_pose()
+    landmarks = result.pose.landmarks.copy()
+    landmarks[0, :2] = np.nan
+    landmarks[1, :2] = np.inf
+    landmarks[2, :2] = 1e20
+    pose = replace(result.pose, landmarks=landmarks)
+    out = render(blank(), replace(result, pose=pose))
+    assert out.shape == blank().shape
+
+
 def test_render_draws_something_with_pose() -> None:
     out = render(blank(), result_with_pose())
     assert out[60, 80].any()  # ponto do nariz

@@ -388,3 +388,87 @@ def test_crouch_feature_from_config_selects_the_signal() -> None:
     assert ("press", "shift") not in _run_crouch(
         _crouch_poses(shoulders_drop=False), AppConfig()
     ).events
+
+
+def test_stale_frames_do_not_generate_input() -> None:
+    clock = FakeClock(t0=10.0)
+    backend = FakeInputBackend()
+    estimator = FakePoseEstimator(PUNCH[:10])
+    deps = make_deps(clock, ClockedSource(clock, 10), estimator, backend)
+    run(deps, NO_PERSISTENCE, max_frames=10)
+    assert not any(kind == "press" for kind, _ in backend.events)
+
+
+def test_inference_delay_is_included_in_frame_age() -> None:
+    clock = FakeClock()
+    backend = FakeInputBackend()
+
+    class SlowEstimator(FakePoseEstimator):
+        def estimate(self, image_bgr: np.ndarray, t: float) -> PoseFrame | None:
+            clock.advance(0.25)
+            return super().estimate(image_bgr, t)
+
+    deps = make_deps(clock, ClockedSource(clock, 6), SlowEstimator(PUNCH[:6]), backend)
+    run(deps, NO_PERSISTENCE, max_frames=6)
+    assert not any(kind == "press" for kind, _ in backend.events)
+
+
+def test_short_exit_zone_visit_allows_held_gesture_to_rearm() -> None:
+    clock = FakeClock()
+    backend = FakeInputBackend()
+    poses = [*PUNCH[:6], punch_in_exit_zone(6 * DT), *PUNCH[7:14]]
+    deps = make_deps(clock, ClockedSource(clock, len(poses)), FakePoseEstimator(poses), backend)
+    run(deps, NO_PERSISTENCE, max_frames=len(poses))
+    assert backend.events.count(("press", "mouse_left")) == 2
+
+
+def test_setup_failure_closes_source_and_estimator(monkeypatch: pytest.MonkeyPatch) -> None:
+    import inmotion.app as app_module
+
+    def fail(*args: object) -> None:
+        raise ValueError("montagem inválida")
+
+    clock = FakeClock()
+    source = ClockedSource(clock, 1)
+    estimator = FakePoseEstimator([])
+    deps = make_deps(clock, source, estimator, FakeInputBackend())
+    monkeypatch.setattr(app_module, "create_pipeline", fail)
+    with pytest.raises(ValueError, match="montagem"):
+        run(deps, NO_PERSISTENCE)
+    assert source.closed
+    assert estimator.closed
+
+
+def test_watchdog_retries_transient_release_failure() -> None:
+    import threading
+
+    from inmotion.app import _watch
+    from inmotion.safety import SafetyManager, TrackedInput
+    from inmotion.watchdog import Watchdog
+
+    stop = threading.Event()
+
+    class FailsOnce(FakeInputBackend):
+        attempts = 0
+
+        def release(self, key: str) -> None:
+            if key == "w":
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise OSError("falha transitória")
+                stop.set()
+            super().release(key)
+
+    backend = FailsOnce()
+    safety = SafetyManager(TrackedInput(backend), NO_PERSISTENCE)
+    safety.input.press("w")
+    watchdog = Watchdog(0.5)
+    watchdog.beat(0)
+    timeout = threading.Timer(2.0, stop.set)
+    timeout.start()
+    try:
+        _watch(watchdog, safety, FakeClock(1.0), stop, 0.5)
+    finally:
+        timeout.cancel()
+    assert backend.attempts == 2
+    assert backend.pressed == set()

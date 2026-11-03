@@ -47,9 +47,11 @@ def main(argv: Sequence[str] | None = None, urlopen: Callable[..., Any] | None =
     try:
         args.models_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Baixando %s", url)
-        with opener(url) as response, partial.open("wb") as out:
+        with opener(url, timeout=30) as response, partial.open("wb") as out:
             while chunk := response.read(_CHUNK_BYTES):
                 out.write(chunk)
+        if partial.stat().st_size == 0:
+            raise OSError("o servidor devolveu um modelo vazio")
         partial.replace(target)
     except OSError as exc:
         partial.unlink(missing_ok=True)

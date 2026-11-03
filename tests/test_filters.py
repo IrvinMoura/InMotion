@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from inmotion.filters import TemporalFilter
@@ -278,6 +278,8 @@ def test_non_finite_time_raises(factory: FilterFactory) -> None:
 
 
 @pytest.mark.parametrize("factory", FACTORIES, ids=FACTORY_IDS)
+# Compara até 99 filtros escalares por frame; não é uma medição de desempenho.
+@settings(deadline=None)
 @given(
     seq=st.lists(
         st.lists(_values, min_size=9, max_size=9),

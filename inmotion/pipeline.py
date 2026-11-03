@@ -9,7 +9,7 @@ from inmotion.config.schema import GameProfile
 from inmotion.exit_zone import ExitZoneState
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
-from inmotion.gestures.base import GestureState
+from inmotion.gestures.base import GestureEvent, GestureState
 from inmotion.gestures.body import BodyGesture, all_idle
 from inmotion.gestures.factory import build_arbiter
 from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context, knee_lift
@@ -43,6 +43,8 @@ class StepResult:
     safety_state: SafetyState
     pose: PoseFrame | None
     exit_zone: ExitZoneState | None = None
+    events: tuple[GestureEvent, ...] = ()
+    pressed: frozenset[str] = frozenset()
 
 
 class Pipeline:
@@ -87,6 +89,9 @@ class Pipeline:
         self._mapper = ActionMapper(profile, safety.input, mapper_params or MapperParams())
         self._was_active = True  # gestos nascem zerados
         self._tracked_since: float | None = None  # início da sequência contínua de pose
+        self._generation = safety.generation
+        self._stall_generation = safety.stall_generation
+        self._needs_reset = False
 
     def step(self, pose: PoseFrame | None, t: float) -> StepResult:
         """on_frame → (se ACTIVE) gestos → árbitro → mapper → FPS.
@@ -111,6 +116,14 @@ class Pipeline:
         ACTIVE sem pose válida ele ainda solta os taps vencidos por tempo.
         """
         raw = pose
+        generation = self._safety.generation
+        if generation != self._generation:
+            self._needs_reset = True
+            self._generation = generation
+        stall_generation = self._safety.stall_generation
+        if stall_generation != self._stall_generation:
+            self._tracked_since = None
+            self._stall_generation = stall_generation
         config = self._safety.config
         required = SHOULDERS if self._crouch_in_progress() else TORSO
         if pose is not None and not is_visible(pose, required, config.min_torso_visibility):
@@ -125,8 +138,9 @@ class Pipeline:
         self._safety.on_frame(t, pose is not None)
         state = self._safety.state
         active = state is SafetyState.ACTIVE
-        if active and not self._was_active:
+        if active and (not self._was_active or self._needs_reset):
             self._reset_all()
+            self._needs_reset = False
         self._was_active = active
         if not active:
             self._mapper.reset()
@@ -135,13 +149,21 @@ class Pipeline:
                 pose = self._pose_filter(pose)
             else:
                 self._pose_filter.reset()  # sem pose ou fora de ACTIVE: recomeça limpo
+        events: tuple[GestureEvent, ...] = ()
         if active:
             if pose is not None:
-                self._run_gestures(pose, t)
+                events = self._run_gestures(pose, t)
             else:
                 self._mapper.update(t)
         fps = self._fps.update(t)
-        return StepResult(t=t, fps=fps, safety_state=state, pose=raw if pose is None else pose)
+        return StepResult(
+            t=t,
+            fps=fps,
+            safety_state=state,
+            pose=raw if pose is None else pose,
+            events=events,
+            pressed=self._safety.input.pressed,
+        )
 
     def _crouch_in_progress(self) -> bool:
         """RF4: o agachar está em ARMING ou ACTIVE e a segurança ainda está em ACTIVE.
@@ -149,11 +171,17 @@ class Pipeline:
         Em LOST/PAUSED o gesto pode estar parado num estado velho (nada o atualiza até o
         reset da volta a ACTIVE), por isso o estado da segurança também conta.
         """
-        if self._crouch is None or self._safety.state is not SafetyState.ACTIVE:
+        if (
+            self._needs_reset
+            or self._crouch is None
+            or self._safety.state is not SafetyState.ACTIVE
+        ):
             return False
         return self._crouch.snapshot().state in (GestureState.ARMING, GestureState.ACTIVE)
 
     def _reset_all(self) -> None:
+        if self._pose_filter is not None:
+            self._pose_filter.reset()
         for gesture in self._gestures:
             gesture.reset()
         self._arbiter.reset()
@@ -166,7 +194,7 @@ class Pipeline:
             knee_baseline.reset()
         self._march.reset()
 
-    def _run_gestures(self, pose: PoseFrame, t: float) -> None:
+    def _run_gestures(self, pose: PoseFrame, t: float) -> tuple[GestureEvent, ...]:
         """Repouso (estado do frame anterior) → contexto → marcha → gestos → árbitro → mapper."""
         resting = all_idle(self._gestures)
         ctx = build_context(
@@ -183,4 +211,6 @@ class Pipeline:
         events = [e for g in self._gestures if (e := g.update(ctx)) is not None]
         if self._combo is not None:
             events.extend(self._combo.derive(events, t))
-        self._mapper.handle(self._arbiter.resolve(events, t), t)
+        resolved = tuple(self._arbiter.resolve(events, t))
+        self._mapper.handle(resolved, t)
+        return resolved

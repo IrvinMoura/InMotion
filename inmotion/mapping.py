@@ -47,6 +47,7 @@ class ActionMapper:
         self._out = out
         self._params = params
         self._due: dict[KeyName, float] = {}  # tecla -> instante em que o tap termina
+        self._holds: dict[KeyName, set[str]] = {}
 
     @property
     def pending(self) -> frozenset[KeyName]:
@@ -63,8 +64,14 @@ class ActionMapper:
             key = binding.input
             if event.kind is EventKind.START:
                 self._out.press(key)
+                self._holds.setdefault(key, set()).add(event.gesture)
             elif event.kind is EventKind.END:
-                self._out.release(key)
+                owners = self._holds.get(key, set())
+                owners.discard(event.gesture)
+                if not owners:
+                    self._holds.pop(key, None)
+                    if key not in self._due:
+                        self._out.release(key)
             elif event.kind is EventKind.PULSE:
                 self._out.press(key)
                 self._due[key] = t + self._params.tap_hold_s
@@ -73,8 +80,10 @@ class ActionMapper:
         """Solta os taps com ``t ≥ t₀ + tap_hold_s``."""
         for key in [k for k, due in self._due.items() if t >= due]:
             del self._due[key]
-            self._out.release(key)
+            if key not in self._holds:
+                self._out.release(key)
 
     def reset(self) -> None:
-        """Esquece os taps pendentes SEM soltar nada (o ``SafetyManager`` já soltou)."""
+        """Esquece taps e holds SEM soltar nada (o ``SafetyManager`` já soltou)."""
         self._due.clear()
+        self._holds.clear()

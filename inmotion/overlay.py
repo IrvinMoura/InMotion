@@ -79,7 +79,8 @@ def render(
     if result.pose is not None:
         scale = np.array([width, height], dtype=np.float64)
         for x, y in result.pose.landmarks[:, :2] * scale:
-            cv2.circle(out, (round(float(x)), round(float(y))), _POINT_RADIUS, _POINT_COLOR, -1)
+            if np.isfinite([x, y]).all() and 0 <= x < width and 0 <= y < height:
+                cv2.circle(out, (round(float(x)), round(float(y))), _POINT_RADIUS, _POINT_COLOR, -1)
 
     fps_text = "FPS: --" if result.fps is None else f"FPS: {result.fps:.1f}"
     cv2.putText(out, fps_text, _TEXT_ORIGIN_FPS, _FONT, _TEXT_SCALE, (255, 255, 255), 1)

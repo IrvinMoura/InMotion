@@ -2,7 +2,44 @@
 
 Jogue com o corpo, usando apenas uma webcam: o InMotion reconhece gestos e os converte em teclas e cliques do mouse. O perfil incluído é o do **Minecraft**.
 
-> **Status:** em desenvolvimento (versão `0.0.0`). Os limiares dos gestos são valores iniciais, calibrados com gravações de sessões guiadas.
+> **Status:** protótipo funcional em desenvolvimento (versão `0.0.0`). Há testes automatizados e regressões com sessões gravadas. A qualidade do reconhecimento ainda precisa ser validada com mais pessoas e condições de uso.
+
+## Experimentar sem câmera nem Minecraft
+
+O simulador reproduz gravações incluídas no repositório, mostra o esqueleto e destaca as teclas e cliques que o pipeline produziria. Não usa webcam, não baixa o modelo de pose e não envia comandos para outras janelas.
+
+No PowerShell, na pasta do projeto:
+
+```powershell
+# Instale o Python 3.10 se ele ainda não estiver disponível no gerenciador py
+py install 3.10
+
+# Crie o ambiente e instale as dependências (uma vez)
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+# Abra a demonstração de marcha, corrida e pulo
+.\.venv\Scripts\python.exe -m tools.simulate
+```
+
+Python de outra versão pode continuar instalado. Os comandos acima selecionam o 3.10 explicitamente; não é preciso ativar a `.venv`. Se seu `py` não reconhecer `install`, instale o Python 3.10 por um instalador e depois crie o ambiente.
+
+Na janela: **Espaço** pausa/retoma a reprodução, **R** reinicia, **N** avança um frame e **Esc** sai. A pausa controla a reprodução da gravação; a pausa de segurança do app é testada separadamente nos testes automatizados.
+
+```powershell
+# Agachamento, com os mesmos filtros e parâmetros do app
+.\.venv\Scripts\python.exe -m tools.simulate --scenario crouch_2m
+
+# Executar sem janela e salvar eventos/comandos para inspeção
+.\.venv\Scripts\python.exe -m tools.simulate --headless --output logs/simulacao.json
+
+# Replay de um arquivo específico, com a linha do tempo dos comandos
+.\.venv\Scripts\python.exe -m tools.replay --recording tests/fixtures/sessions/march_2m.npz --timeline
+```
+
+Cenários incluídos: `march_2m`, `march_1m5`, `crouch_2m` e `crouch_1m5`. Para outro arquivo, use `--recording caminho.npz`. Replay e simulador aceitam `--config`, `--game`, `--profile` e `--set`; por exemplo, `--set handedness=left`. As gravações demonstram movimentos já coletados; não medem o desempenho da webcam nem da inferência nesta máquina.
+
+O Minecraft é apenas o perfil de controles incluído. O código não consulta conta, launcher ou edição do jogo. É possível testar toda a lógica sem jogo; o comportamento dentro de cada jogo deve ser verificado com ele aberto e em foco.
 
 ### Núcleo do Sistema
 | Módulo                     | Descrição                                                         |
@@ -10,7 +47,7 @@ Jogue com o corpo, usando apenas uma webcam: o InMotion reconhece gestos e os co
 | **Captura**                | Lê frames da webcam via OpenCV (MJPG, 640x480, até 60 FPS)        |
 | **Pose**                   | Estima os landmarks do corpo com o MediaPipe PoseLandmarker       |
 | **Gestos e Árbitro**       | Reconhece socos, pulo, agachar e marcha; resolve conflitos        |
-| **Segurança**              | Garante que nenhuma tecla ou botão fique preso                    |
+| **Segurança**              | Libera comandos na pausa, perda de pose, travamento e encerramento |
 | **Ferramentas**            | Gravação, replay, sessões guiadas e benchmark para calibração     |
 
 ### Gestos e Controles (Minecraft)
@@ -79,7 +116,7 @@ git clone https://github.com/IrvinMoura/InMotion.git
 cd InMotion
 
 # Crie um ambiente virtual (recomendado)
-python -m venv .venv
+py -3.10 -m venv .venv
 .venv\Scripts\activate
 
 # Instale as dependências
@@ -111,6 +148,7 @@ Há também uma zona de saída provisória: manter a mão no retângulo do canto
 |------------------------|----------------------------------------------------------------------------|
 | `--config ARQUIVO`     | YAML base, no lugar de `config/default.yaml`                               |
 | `--game NOME`          | Perfil em `config/games/NOME.yaml` (ex.: `minecraft`)                      |
+| `--profile ARQUIVO`    | YAML pessoal, aplicado após o perfil do jogo e antes dos overrides      |
 | `--set CAMINHO=VALOR`  | Sobrescreve um campo (repetível). Ex.: `--set filters.ema.alpha=0.4`       |
 | `--camera N`           | Índice da câmera                                                           |
 | `--camera-backend`     | `dshow`, `msmf` ou `any`                                                   |
@@ -148,6 +186,7 @@ Para outro jogo, copie `config/games/minecraft.yaml`, ajuste `bindings` e `arbit
 | **Perda de pose**    | Sem pose por 0,2 s, solta todo o input                                         |
 | **Pose fantasma**    | Só vale com ombros e quadris visíveis e 1,0 s de rastreamento contínuo         |
 | **Watchdog**         | Loop travado por mais de 0,5 s: uma thread separada solta tudo                 |
+| **Frame antigo**     | Pose com mais de 0,2 s desde a captura é descartada (usa `safety.lost_timeout_s`) |
 | **Teclas globais**   | `F8` e `F9` funcionam com qualquer janela em foco                              |
 | **Saída do processo**| `release_all()` roda também no `atexit`; botões do mouse são sempre soltos     |
 
@@ -159,7 +198,8 @@ Para outro jogo, copie `config/games/minecraft.yaml`, ajuste `bindings` e `arbit
 | `bench_pose`     | Mede FPS e latência por variante                                         | `python -m tools.bench_pose --seconds 10`                                 |
 | `guided`         | Sessão guiada em tela grande (**não envia input**); grava `.npz` e `.json` | `python -m tools.guided --person p1 --distance 2.0 --script full`       |
 | `record`         | Grava landmarks rotulados por teclas (`1` soco D, `2` soco E, `3` pulo, `4` agachar, `5` inclinar) | `python -m tools.record --person p1 --lighting clara --out data/p1.npz` |
-| `replay`         | Reproduz uma gravação pelo mesmo pipeline do app                         | `python tools/replay.py --recording sessao.npz`                           |
+| `replay`         | Reproduz uma gravação pelo mesmo pipeline do app, sem input real        | `python -m tools.replay --recording sessao.npz --timeline`                 |
+| `simulate`       | Mostra esqueleto, estado de segurança e comandos simulados              | `python -m tools.simulate --scenario march_2m`                            |
 
 Roteiros do `guided`: `full`, `crouch` e `march`. Em `record`, `--lighting` aceita `clara`, `escura` ou `outra`. `F9` encerra e salva o que já foi gravado.
 
@@ -182,7 +222,7 @@ InMotion/
 │   ├── safety.py           → Segurança de input
 │   ├── mapping.py          → Gesto → entrada
 │   └── recording.py / recorder.py / replay.py → Gravação e replay
-├── tools/                  → download_model, bench_pose, guided, record, replay
+├── tools/                  → download_model, bench_pose, guided, record, replay, simulate
 ├── tests/                  → Testes e fixtures de sessões .npz
 ├── pyproject.toml          → Ruff, pytest e mypy
 ├── requirements.txt        → Dependências de runtime (versões fixas)
@@ -190,6 +230,8 @@ InMotion/
 ```
 
 ## Desenvolvimento
+
+Veja [CONTRIBUTING.md](CONTRIBUTING.md) para a arquitetura, decisões de segurança e roteiro de validação. Os comandos abaixo pressupõem a `.venv` ativada; também é possível usar `.\.venv\Scripts\python.exe -m` antes do nome de cada ferramenta.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -208,10 +250,12 @@ pytest -m "not hardware and not slow"  # testes, como no CI
 
 ## Autores
 
-[IrvinMoura]      (https://github.com/IrvinMoura)   - Projeto A3
-[João Vítor]      (https://github.com/VihSousa)     - Projeto A3
-[Gabriel Moreira] (https://github.com/Dhekki)       - Projeto A3
+[IrvinMoura](https://github.com/IrvinMoura) — Projeto A3
+
+[João Vítor](https://github.com/VihSousa) — Projeto A3
+
+[Gabriel Moreira](https://github.com/Dhekki) — Projeto A3
 
 ## Licença
 
-Defina a licença do projeto (nenhum arquivo `LICENSE` foi encontrado no repositório).
+Licença ainda não definida pelos autores. Não há arquivo `LICENSE` neste repositório.

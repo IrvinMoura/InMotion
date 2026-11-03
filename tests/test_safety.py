@@ -62,6 +62,20 @@ def test_release_all_empties_pressed() -> None:
     assert fake.pressed == set()
 
 
+def test_press_failure_after_injection_still_releases_key() -> None:
+    class PartialFailure(FakeInputBackend):
+        def press(self, key: str) -> None:
+            super().press(key)
+            raise BoomError("falha após enviar")
+
+    fake = PartialFailure()
+    manager = SafetyManager(TrackedInput(fake), SafetyConfig())
+    with pytest.raises(BoomError), manager.guard():
+        manager.input.press("w")
+    assert fake.pressed == set()
+    assert "w" in fake.released()
+
+
 def test_release_all_twice_is_idempotent() -> None:
     fake = FakeInputBackend()
     tracked = TrackedInput(fake, MOUSE_BUTTONS)

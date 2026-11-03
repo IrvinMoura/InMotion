@@ -6,6 +6,7 @@ aqui ficam o loop, a thread do watchdog e o ``OpenCvDisplay``.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import threading
 from collections.abc import Callable
@@ -15,18 +16,12 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from inmotion.config.schema import AppConfig, Binding, FilterConfig, GameProfile
+from inmotion.config.schema import AppConfig, FilterConfig, GameProfile
 from inmotion.exit_zone import ExitZone, ExitZoneConfig
-from inmotion.filters.ema import Ema
-from inmotion.filters.one_euro import OneEuro
 from inmotion.filters.pose_filter import PoseFilter
-from inmotion.fps import FpsMeter
-from inmotion.gestures.arbiter import ArbiterConfig
-from inmotion.gestures.base import GestureKind
-from inmotion.gestures.factory import build_body_gestures
 from inmotion.input.backend import HotkeySource, InputBackend
 from inmotion.overlay import render
-from inmotion.pipeline import Pipeline, StepResult
+from inmotion.pipeline import StepResult
 from inmotion.ports import Clock, Display, FrameSource, PoseEstimator
 from inmotion.safety import (
     SafetyAction,
@@ -35,52 +30,15 @@ from inmotion.safety import (
     TrackedInput,
     register_atexit,
 )
-from inmotion.vision.landmarks import Side
+from inmotion.session import DEFAULT_PROFILE, create_pipeline, pose_filter_from_config
 from inmotion.watchdog import Watchdog
 
 _log = logging.getLogger(__name__)
 
 WATCHDOG_POLL_S = 0.05  # período da thread que consulta o watchdog
 READ_TIMEOUT_S = 0.1  # espera máxima por frame novo
-FPS_WINDOW = 30
 WINDOW_NAME = "InMotion"
 _THREAD_JOIN_S = 1.0
-
-# Perfil usado quando não há ``--game``: o do Minecraft (usuário destro: ataque = braço
-# direito, botão esquerdo; usar item = braço esquerdo, botão direito; spec 017: sem ``walk``
-# até a marcha da spec 018, e agachar vence o pulo). Um teste confere que
-# é igual a ``config/games/minecraft.yaml``.
-DEFAULT_PROFILE = GameProfile(
-    "minecraft",
-    {
-        "attack": Binding("mouse_left", GestureKind.HOLD),
-        "use": Binding("mouse_right", GestureKind.HOLD),
-        "jump": Binding("space", GestureKind.TRIGGER),
-        "crouch": Binding("shift", GestureKind.HOLD),
-        "walk": Binding("w", GestureKind.HOLD),
-        "sprint": Binding("ctrl", GestureKind.HOLD),
-    },
-    ArbiterConfig(
-        priority=("both_arms", "crouch", "jump", "attack", "use", "walk", "sprint"),
-        exclusive=(
-            frozenset({"crouch", "jump"}),
-            frozenset({"crouch", "walk"}),
-            frozenset({"crouch", "sprint"}),
-        ),
-        combos={"both_arms": frozenset({"attack", "use"})},
-    ),
-)
-
-
-def pose_filter_from_config(config: FilterConfig) -> PoseFilter | None:
-    """Um filtro para image e outro para world, do tipo e parâmetros da config (R1-R4)."""
-    if config.kind == "none":
-        return None
-    if config.kind == "ema":
-        ema_params = config.ema
-        return PoseFilter(lambda: Ema(ema_params))
-    one_euro_params = config.one_euro
-    return PoseFilter(lambda: OneEuro(one_euro_params))
 
 
 def default_pose_filter() -> PoseFilter | None:
@@ -127,12 +85,17 @@ def _watch(
     watchdog: Watchdog, safety: SafetyManager, clock: Clock, stop: threading.Event, timeout_s: float
 ) -> None:
     """Thread do watchdog: se o loop parar de bater, solta todo o input."""
+    retry_release = False
     while not stop.wait(WATCHDOG_POLL_S):
-        if watchdog.expired(clock.now()):
+        expired = watchdog.expired(clock.now())
+        if expired:
             _log.error("Loop travado por mais de %.2f s: soltando todo o input", timeout_s)
+        if expired or retry_release:
             try:
                 safety.on_stall()
+                retry_release = False
             except Exception:
+                retry_release = True
                 _log.exception("on_stall() falhou")
 
 
@@ -145,7 +108,7 @@ def _close_quietly(name: str, obj: FrameSource | PoseEstimator | Display | None)
         _log.exception("Falha ao fechar %s", name)
 
 
-def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = None) -> int:
+def _run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = None) -> int:
     """Loop principal. Devolve 0 na saída normal (F9, janela fechada, zona de saída ou
     ``max_frames``).
 
@@ -159,25 +122,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
     tracked = TrackedInput(deps.backend, safety_config.always_release)
     safety = SafetyManager(tracked, safety_config)
     config = deps.config
-    gestures = build_body_gestures(
-        deps.profile.bindings,
-        Side.RIGHT if config.handedness == "right" else Side.LEFT,
-        config.gestures,
-        config.geometry,
-        config.crouch.feature,
-        config.march,
-    )
-    pipeline = Pipeline(
-        safety,
-        gestures,
-        FpsMeter(window=FPS_WINDOW),
-        deps.pose_filter,
-        profile=deps.profile,
-        mapper_params=config.mapper,
-        baseline_params=config.baseline,
-        march_params=config.march,
-        geometry=config.geometry,
-    )
+    pipeline = create_pipeline(safety, config, deps.profile, deps.pose_filter)
     watchdog = Watchdog(safety_config.watchdog_timeout_s)
     exit_zone = ExitZone(deps.exit_zone) if deps.exit_zone is not None else None
     register_atexit(safety)
@@ -190,6 +135,8 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
         daemon=True,
     )
     frames = 0
+    zone_inside = False
+    clean_exit = False
     try:
         watcher.start()
         with safety.guard():
@@ -207,12 +154,18 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
                     if deps.preprocess is not None:
                         image = deps.preprocess(image)  # só a pose vê; a janela mostra o cru
                     pose = deps.estimator.estimate(image, packet.t)
+                # A segurança usa o horário atual, incluindo espera e inferência.
+                t = deps.clock.now()
+                if packet is not None and t - packet.t > safety_config.lost_timeout_s:
+                    pose = None
                 zone = exit_zone.update(pose, t) if exit_zone is not None else None
                 if zone is not None and zone.inside:
-                    tracked.release_all()
+                    if not zone_inside:
+                        safety.on_stall()
                     result = replace(pipeline.step(None, t), pose=pose, exit_zone=zone)
                 else:
                     result = replace(pipeline.step(pose, t), exit_zone=zone)
+                zone_inside = zone is not None and zone.inside
                 if (
                     deps.display is not None
                     and packet is not None
@@ -223,11 +176,21 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
                 if zone is not None and zone.triggered:
                     _log.info("Saída pela zona de saída (mão segurada %.0f s)", zone.config.hold_s)
                     break
+        clean_exit = True
     finally:
         stop.set()
         if watcher.is_alive():
             watcher.join(_THREAD_JOIN_S)
+        if clean_exit:
+            atexit.unregister(safety.input.release_all)
+    return 0
+
+
+def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = None) -> int:
+    """Executa a sessão e fecha recursos inclusive se a montagem do pipeline falhar."""
+    try:
+        return _run(deps, safety_config, max_frames)
+    finally:
         _close_quietly("source", deps.source)
         _close_quietly("estimator", deps.estimator)
         _close_quietly("display", deps.display)
-    return 0
