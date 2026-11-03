@@ -208,9 +208,9 @@ pytest -m "not hardware and not slow"  # testes, como no CI
 
 ## Autores
 
-[IrvinMoura]      (https://github.com/IrvinMoura)   - Projeto A3
-[João Vítor]      (https://github.com/VihSousa)     - Projeto A3
-[Gabriel Moreira] (https://github.com/Dhekki)       - Projeto A3
+- [IrvinMoura](https://github.com/IrvinMoura)
+- [João Vítor](https://github.com/VihSousa)
+- [Gabriel Moreira](https://github.com/Dhekki) 
 
 ## Licença
 
