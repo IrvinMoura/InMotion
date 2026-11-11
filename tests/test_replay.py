@@ -303,11 +303,14 @@ def test_without_jump_gate_memory_fast_march_jumps() -> None:
     assert "space" in _presses_in(rec, "march_fast", presses)
 
 
-def test_slow_march_with_a_faster_burst_does_not_sprint() -> None:
+@pytest.mark.parametrize("name", ["march_2m_burst.npz", "march_2m_dropped.npz"])
+def test_slow_march_with_a_faster_burst_does_not_sprint(name: str) -> None:
     """018 T8 (11/11/2026, 2 m): na marcha lenta houve um trecho de ~1 s mais rápido
     (cadência p90 2,41). Com correr em 2,0/1,7 isso apertava `ctrl`; correr exige ritmo
     claramente rápido (≥ 2,5 passos/s por 0,5 s). A marcha rápida continua com `ctrl`."""
-    rec, presses = _replay_like_app("march_2m_burst.npz")
+    # march_2m_dropped (11/11, 23:47): quadros perdidos dobravam passos (cadência lida 2,6 numa
+    # marcha de 1,4 passos/s); coberto pelo rearme do passo (step_rearm).
+    rec, presses = _replay_like_app(name)
     slow = _presses_in(rec, "march_slow", presses)
     assert "w" in slow
     assert "ctrl" not in slow

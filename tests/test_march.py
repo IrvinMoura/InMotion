@@ -266,3 +266,34 @@ def test_jump_feature_is_zero_while_knee_lifted_recently() -> None:
     assert gesture.feature_value == 0.0
     gesture.update(_ctx(DT, MarchState(True, None, 2, knee_lifted_recently=False)))
     assert gesture.feature_value is None  # sem esqueleto no contexto: volta ao j normal
+
+
+def test_dropped_frame_does_not_count_the_same_lift_twice() -> None:
+    """T8 (11/11/2026): o outro joelho some por um quadro (visibilidade), o lado erguido é
+    bloqueado e, quando o outro volta, o mesmo levantamento contava de novo — um passo
+    virava dois ou três e a cadência dobrava. Um lado só conta outro passo depois de o
+    joelho ser visto abaixado (``k < step_rearm``)."""
+    tracker = MarchTracker(MarchParams())
+    frames = [
+        (0.0, 0.0),
+        (0.6, 0.0),  # passo esquerdo
+        (0.0, 0.0),
+        (0.0, 0.6),  # passo direito: andando, 2 passos
+        (None, 0.6),  # esquerdo some: direito bloqueado neste quadro
+        (0.0, 0.5),  # esquerdo volta; o direito ainda erguido NÃO é passo novo
+        (0.0, 0.4),
+        (0.0, 0.1),  # direito abaixou: rearmado
+        (0.6, 0.0),  # passo esquerdo: 3
+    ]
+    steps = [tracker.update(kl, kr, i * 0.1).steps for i, (kl, kr) in enumerate(frames)]
+    assert steps[3] == 2
+    assert steps[5] == 2  # o retorno do esquerdo não gerou passo duplicado
+    assert steps[-1] == 3
+
+
+def test_step_rearm_default_and_validation() -> None:
+    assert MarchParams().step_rearm == pytest.approx(0.25)
+    with pytest.raises(ValueError, match="step_rearm"):
+        MarchParams(step_rearm=0.5)  # acima do θ_on do passo (0,30)
+    with pytest.raises(ValueError, match="step_rearm"):
+        MarchParams(step_rearm=0.0)

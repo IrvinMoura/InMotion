@@ -36,6 +36,7 @@ class MarchParams:
     step_timeout_s: float = 1.2
     cadence_alpha: float = 0.3
     jump_gate_hold_s: float = 0.5
+    step_rearm: float = 0.25
     step: GestureParams = field(default_factory=lambda: DEFAULT_STEP_PARAMS)
 
     def __post_init__(self) -> None:
@@ -47,6 +48,8 @@ class MarchParams:
             raise ValueError("cadence_alpha deve estar em (0, 1]")
         if not (math.isfinite(self.jump_gate_hold_s) and self.jump_gate_hold_s >= 0.0):
             raise ValueError("jump_gate_hold_s deve ser finito e >= 0")
+        if not (0.0 < self.step_rearm <= self.step.theta_on):
+            raise ValueError("step_rearm deve estar em (0, theta_on do passo]")
         if self.step.direction is not Direction.ABOVE:
             raise ValueError("step deve ter direction ABOVE (o joelho sobe com k > theta_on)")
 
@@ -71,6 +74,10 @@ class MarchTracker:
     - **Outro joelho abaixado:** um passo só conta se o outro joelho estiver **visível** e
       com ``k_outro < θ_on``. No agachar os dois joelhos sobem juntos e o de trás some
       (visibilidade ~0,06); tratar ``None`` como abaixado gerava ``w`` agachado (T6).
+    - **Rearme (T8):** depois de um passo, o lado só conta outro quando o joelho é **visto**
+      abaixo de ``step_rearm``. Um quadro sem o outro joelho bloqueia o lado erguido e o
+      ``Gesture`` se rearma; sem esta regra o mesmo levantamento contava duas ou três vezes
+      e a cadência dobrava (11/11/2026: marcha lenta de 1,4 passos/s lida como 2,6).
     - **Joelho erguido recente (RF6b):** ``knee_lifted_recently`` vale enquanto algum ``k``
       passou de ``θ_on`` há menos de ``jump_gate_hold_s``; o quique do quadril na marcha
       vem logo depois de o joelho descer (T6: 0,5 s zera os pulos falsos do replay).
@@ -95,6 +102,7 @@ class MarchTracker:
         }
         self._last_lift_t: float | None = None  # último quadro com algum joelho erguido
         self._now = 0.0
+        self._armed = {Side.LEFT: True, Side.RIGHT: True}  # lado pode contar novo passo
         self._clear()
 
     def _clear(self) -> None:
@@ -109,6 +117,9 @@ class MarchTracker:
         if self._last_t is not None and t - self._last_t > self._params.step_timeout_s:
             self._clear()  # M3: sem passo por step_timeout_s, para
         on = self._params.step.theta_on
+        for side, k in ((Side.LEFT, k_left), (Side.RIGHT, k_right)):
+            if k is not None and k < self._params.step_rearm:
+                self._armed[side] = True  # joelho visto abaixado: próximo levantamento conta
         if any(k is not None and k > on for k in (k_left, k_right)):
             self._last_lift_t = t
         self._now = t
@@ -131,6 +142,9 @@ class MarchTracker:
         return MarchState(self._walking, cadence, self._steps, recent)
 
     def _on_step(self, side: Side, t: float) -> None:
+        if not self._armed[side]:
+            return  # mesmo levantamento visto de novo (quadro perdido no meio)
+        self._armed[side] = False
         if self._last_t is None:
             self._steps = 1
         elif self._walking or side is not self._last_side:
@@ -158,6 +172,7 @@ class MarchTracker:
         for gesture in self._gestures.values():
             gesture.reset()
         self._last_lift_t = None
+        self._armed = {Side.LEFT: True, Side.RIGHT: True}
         self._clear()
 
 

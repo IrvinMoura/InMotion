@@ -96,6 +96,10 @@ march:
   # quadril vem logo após o joelho descer; 0,3 s ainda deixava 1 pulo falso a 1,5 m e 0,5 s
   # zerou, mantendo os 3 pulos reais de todas as sessões (T6, 01/11/2026).
   jump_gate_hold_s: 0.5
+  # Rearme do passo (T8): depois de um passo, o lado só conta outro quando o joelho é visto
+  # abaixo disto. Sem isso um quadro perdido fazia o mesmo levantamento contar 2-3 vezes
+  # (marcha lenta de 1,4 passos/s lida como 2,6). Com 0,15 a marcha rápida perdia passos.
+  step_rearm: 0.25
 
 # ActionMapper: duração do tap de um gesto trigger (> 1 tick de 50 ms do Minecraft).
 mapper:
