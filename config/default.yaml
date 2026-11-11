@@ -57,9 +57,10 @@ gestures:
   # walk e sprint (spec 018): sinais do MarchTracker; o início e o fim do andar vêm de
   # march.min_steps e march.step_timeout_s. Valores iniciais da T0 de 01/11/2026.
   walk:   {theta_on: 0.6,  theta_off: 0.4,  direction: above, debounce_frames: 1, cooldown_s: 0.0}
-  # sprint (T6): com cadence_alpha 0,3 a marcha lenta chega a 1,68 passos/s e a rápida passa
-  # de 2,0 (sessões de 01/11/2026); f_on 2,0 (1,19x a lenta) e f_off 1,7.
-  sprint: {theta_on: 2.0,  theta_off: 1.7,  direction: above, debounce_frames: 1, cooldown_s: 0.0}
+  # sprint (T8, 4 sessões de 01 e 11/11/2026): marcha lenta mediana 1,46–1,68 passos/s, com
+  # rajadas de ~1 s até 2,41 (ctrl falso com 2,0); rápida mediana 2,71–3,26. f_on 2,5 por
+  # 15 quadros (0,5 s) e f_off 2,1: para correr, marche claramente rápido.
+  sprint: {theta_on: 2.5,  theta_off: 2.1,  direction: above, debounce_frames: 15, cooldown_s: 0.0}
 
 # Sinal do agachar (spec 017 RF3): shoulders = queda dos ombros (continua visível sem o
 # quadril); hip = (h - base)/s, do quadril (spec 008). Ao trocar, ajuste gestures.crouch.

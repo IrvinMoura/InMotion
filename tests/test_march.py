@@ -135,12 +135,27 @@ def test_sprint_hysteresis_and_ends_with_walk() -> None:
     on, off = DEFAULT_SPRINT_PARAMS.theta_on, DEFAULT_SPRINT_PARAMS.theta_off
     # abaixo de f_off, acima de f_on, entre os dois (mantém), abaixo de f_off, acima de f_on
     cadences = (off - 0.3, on + 0.2, (on + off) / 2, off - 0.1, on + 0.1)
-    walking = [MarchState(True, f, 4) for f in cadences]
+    # cada nível dura o debounce do correr (T8: 15 quadros), para o START poder sair
+    hold = DEFAULT_SPRINT_PARAMS.debounce_frames
+    walking = [MarchState(True, f, 4) for f in cadences for _ in range(hold)]
     events = [gesture.update(_ctx(i * DT, s)) for i, s in enumerate(walking)]
     assert _kinds(events) == [EventKind.START, EventKind.END, EventKind.START]
+    t_end = len(walking) * DT
     assert (
-        gesture.update(_ctx(1.0, MarchState(False, on + 0.1, 0))) is not None
+        gesture.update(_ctx(t_end, MarchState(False, on + 0.1, 0))) is not None
     )  # fim do walk -> END
+
+
+def test_short_cadence_burst_does_not_sprint() -> None:
+    """T8: uma rajada mais curta que o debounce (0,5 s) não liga o correr."""
+    from inmotion.gestures.march import DEFAULT_SPRINT_PARAMS
+
+    gesture = sprint_gesture()
+    burst = DEFAULT_SPRINT_PARAMS.debounce_frames - 1
+    states = [MarchState(True, DEFAULT_SPRINT_PARAMS.theta_on + 0.5, 4)] * burst
+    states += [MarchState(True, 1.5, 4)] * 5
+    events = [gesture.update(_ctx(i * DT, s)) for i, s in enumerate(states)]
+    assert _kinds(events) == []
 
 
 def test_both_knees_up_is_not_a_step() -> None:

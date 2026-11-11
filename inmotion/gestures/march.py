@@ -22,8 +22,9 @@ from inmotion.vision.landmarks import Side
 # Passo (spec 018 T0): k parado <= 0,08, no pulo <= 0,14, marchando p95 >= 0,38.
 DEFAULT_STEP_PARAMS = GestureParams(0.30, 0.15, Direction.ABOVE, debounce_frames=1)
 DEFAULT_WALK_PARAMS = GestureParams(0.6, 0.4, Direction.ABOVE, debounce_frames=1)
-# Correr (T6): com α = 0,3 a marcha lenta chega a 1,68 passos/s e a rápida passa de 2,0.
-DEFAULT_SPRINT_PARAMS = GestureParams(2.0, 1.7, Direction.ABOVE, debounce_frames=1)
+# Correr (T8, 11/11/2026): marcha lenta mediana 1,46 a 1,68 passos/s, mas com rajadas de ~1 s
+# até 2,41; marcha rápida mediana 2,71 a 3,26. Liga em 2,5 só após 15 quadros (0,5 s a 30 FPS).
+DEFAULT_SPRINT_PARAMS = GestureParams(2.5, 2.1, Direction.ABOVE, debounce_frames=15)
 
 
 @dataclass(frozen=True)

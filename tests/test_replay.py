@@ -301,3 +301,14 @@ def test_without_jump_gate_memory_fast_march_jumps() -> None:
     """Controle: sem a memória do portão do pulo, a marcha rápida a 1,5 m gera `space`."""
     rec, presses = _replay_like_app("march_1m5.npz", overrides=("march.jump_gate_hold_s=0",))
     assert "space" in _presses_in(rec, "march_fast", presses)
+
+
+def test_slow_march_with_a_faster_burst_does_not_sprint() -> None:
+    """018 T8 (11/11/2026, 2 m): na marcha lenta houve um trecho de ~1 s mais rápido
+    (cadência p90 2,41). Com correr em 2,0/1,7 isso apertava `ctrl`; correr exige ritmo
+    claramente rápido (≥ 2,5 passos/s por 0,5 s). A marcha rápida continua com `ctrl`."""
+    rec, presses = _replay_like_app("march_2m_burst.npz")
+    slow = _presses_in(rec, "march_slow", presses)
+    assert "w" in slow
+    assert "ctrl" not in slow
+    assert "ctrl" in _presses_in(rec, "march_fast", presses)
