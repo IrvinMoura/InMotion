@@ -14,7 +14,7 @@ from inmotion.input.backend import MOUSE_BUTTONS, InputBackend
 from inmotion.pipeline import Pipeline, StepResult
 from inmotion.recorder import Recorder, load_recording
 from inmotion.recording import Recording, RecordingMeta
-from inmotion.replay import RecordingInputBackend, run_replay
+from inmotion.replay import RecordingInputBackend, ReplayResult, run_replay
 from inmotion.safety import SafetyConfig, SafetyManager, TrackedInput
 from inmotion.types import PoseFrame
 from tests.fakes import FakeInputBackend
@@ -196,6 +196,15 @@ def _replay_like_app(
 ) -> tuple[Recording, list]:
     """Replay com a mesma montagem do app (config, perfil, filtro One Euro); ``overrides``
     são sobrescritas no formato do ``--set``."""
+    rec, result = _run_like_app(name, rest_band, overrides)
+    return rec, [(t, key) for t, kind, key in result.inputs if kind == "press"]
+
+
+def _run_like_app(
+    name: str, rest_band: float | None = None, overrides: tuple[str, ...] = ()
+) -> tuple[Recording, ReplayResult]:
+    """Monta o pipeline como o app (inclusive a câmera pela cabeça, spec 014) e roda o
+    replay guardando os ``StepResult`` de cada frame."""
     from dataclasses import replace
 
     from inmotion.app import pose_filter_from_config
@@ -230,11 +239,11 @@ def _replay_like_app(
             baseline_params=baseline,
             march_params=config.march,
             geometry=config.geometry,
+            head_look=config.head_look if config.head_look.enabled else None,
         )
         return pipeline, safety
 
-    result = run_replay(rec, build)
-    return rec, [(t, key) for t, kind, key in result.inputs if kind == "press"]
+    return rec, run_replay(rec, build, keep_snapshots=True)
 
 
 def _presses_in(rec: Recording, label: str, presses: list) -> list[str]:
@@ -315,3 +324,60 @@ def test_slow_march_with_a_faster_burst_does_not_sprint(name: str) -> None:
     assert "w" in slow
     assert "ctrl" not in slow
     assert "ctrl" in _presses_in(rec, "march_fast", presses)
+
+
+# --- Spec 014 T7: câmera pela cabeça sobre sessões reais (CA6) ---
+# Recortes sem world de recordings/guided_p1_20261112-002128 (2 m) e -002443 (1,5 m), roteiro
+# `look` da T0: `look_*` = parado, olhar pouco/bem à esquerda, olhar pouco à direita (com voltas
+# ao centro); `look_gestures_*` = socos dos dois braços e marcha rápida olhando a tela, parado.
+
+DEG_PER_PX = 0.15  # Minecraft, sensibilidade padrão
+MAX_DRIFT_DEG = 5.0  # gestos olhando a tela: no replay de 12/11/2026 todos deram 0,0-0,1 grau
+# O menor olhar intencional (pouco à direita, 2 m: yaw 0,24, logo acima de d = 0,15) girou
+# 13 graus em 4 s neste recorte; o limite só confere o sentido com folga.
+MIN_LOOK_DEG = 10.0
+LOOK_FIXTURES = ("look_2m.npz", "look_1m5.npz")
+STILL_GESTURE_FIXTURES = (
+    "look_gestures_2m.npz",
+    "look_gestures_1m5.npz",
+    *CROUCH_FIXTURES,
+    *MARCH_FIXTURES,
+)
+
+
+def _camera_deg(name: str) -> dict[str, float]:
+    """Rotação acumulada da câmera (graus, > 0 = para a direita) em cada passo rotulado."""
+    rec, result = _run_like_app(name)
+    assert result.snapshots is not None
+    turns: dict[str, float] = {}
+    for lab in rec.labels:
+        dx = sum(s.look[0] for s in result.snapshots if lab.start <= s.t <= lab.end)
+        turns[lab.gesture] = dx * DEG_PER_PX
+    return turns
+
+
+@pytest.mark.parametrize("name", LOOK_FIXTURES)
+def test_head_look_turns_the_right_way(name: str) -> None:
+    """CA6: olhar para a esquerda da pessoa gira a câmera para a esquerda, e para a direita,
+    para a direita; parado e de volta ao centro, nada."""
+    turns = _camera_deg(name)
+    for label in ("look_left_small", "look_left_big"):
+        assert turns[label] <= -MIN_LOOK_DEG
+    assert turns["look_right_small"] >= MIN_LOOK_DEG
+    assert turns["look_left_big"] < turns["look_left_small"]  # olhar mais = girar mais
+    for label in ("rest", "center_1", "center_2", "center_3"):
+        assert abs(turns[label]) <= MAX_DRIFT_DEG
+
+
+@pytest.mark.parametrize("name", STILL_GESTURE_FIXTURES)
+def test_head_look_drift_during_gestures(name: str) -> None:
+    """CA6: soco, marcha, agachar, inclinar e parado, olhando a tela, não giram a câmera.
+
+    Fica de fora o `jump` de `march_1m5`: ali a pessoa virou a cabeça de verdade (yaw −0,5
+    sustentado por > 1 s, sem pico), e a câmera girar é o comportamento certo.
+    """
+    turns = _camera_deg(name)
+    for label, deg in turns.items():
+        if label == "jump" and name == "march_1m5.npz":
+            continue
+        assert abs(deg) <= MAX_DRIFT_DEG, (label, deg)
