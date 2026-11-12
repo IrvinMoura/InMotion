@@ -124,10 +124,56 @@ def march_steps(handedness: str) -> tuple[GuidedStep, ...]:
     )
 
 
+def look_steps(handedness: str) -> tuple[GuidedStep, ...]:
+    """Roteiro da spec 014 T0 (~3 min): olhar para os lados, para cima e para baixo, socos
+    e marcha olhando para a tela e, por fim, soco e marcha combinados com o olhar.
+
+    Cada "olhe" é seguido de uma volta ao centro, para medir o movimento intencional contra
+    o neutro. Olhar não pode apertar nada, então esses passos esperam zero teclas (e assim
+    ficam rotulados na gravação). Os lados são os da pessoa.
+    """
+    dominant, other = ("DIREITO", "ESQUERDO") if handedness == "right" else ("ESQUERDO", "DIREITO")
+    looks = (
+        ("look_left_small", "OLHE UM POUCO P/ SUA ESQUERDA, SEGURE"),
+        ("look_left_big", "OLHE BEM P/ SUA ESQUERDA, SEGURE"),
+        ("look_right_small", "OLHE UM POUCO P/ SUA DIREITA, SEGURE"),
+        ("look_right_big", "OLHE BEM P/ SUA DIREITA, SEGURE"),
+        ("look_up", "OLHE PARA CIMA, SEGURE"),
+        ("look_down", "OLHE PARA BAIXO, SEGURE"),
+    )
+    head: list[GuidedStep] = []
+    for i, (label, title) in enumerate(looks, start=1):
+        head.append(GuidedStep(label, title, 4.0, None, 0))
+        head.append(GuidedStep(f"center_{i}", "OLHE PARA A TELA", 3.0, None, 0))
+    return (
+        GuidedStep("setup", "VA PARA A DISTANCIA, CORPO INTEIRO NA TELA", 6.0, None, None),
+        GuidedStep("rest", "OLHE PARA A TELA, PARADO", 6.0, None, 0),
+        *head,
+        GuidedStep("punch_dominant", f"3 SOCOS {dominant}, OLHANDO A TELA", 8.0, "attack", 3),
+        GuidedStep("punch_other", f"3 SOCOS {other}, OLHANDO A TELA", 8.0, "use", 3),
+        GuidedStep(
+            "march_fast",
+            "MARCHE RAPIDO, OLHANDO A TELA",
+            8.0,
+            "sprint",
+            1,
+            at_least=True,
+            allow=("walk",),
+        ),
+        GuidedStep("rest_mid", "PARE E OLHE PARA A TELA", 5.0, None, 0),
+        GuidedStep("punch_look", f"3 SOCOS {dominant}, OLHANDO P/ ESQUERDA", 8.0, "attack", 3),
+        GuidedStep(
+            "march_look", "MARCHE DEVAGAR, OLHANDO P/ DIREITA", 8.0, "walk", 1, at_least=True
+        ),
+        GuidedStep("rest_end", "OLHE PARA A TELA, PARADO", 6.0, None, 0),
+    )
+
+
 SCRIPTS: Mapping[str, Callable[[str], tuple[GuidedStep, ...]]] = {
     "full": default_steps,
     "crouch": crouch_steps,
     "march": march_steps,
+    "look": look_steps,
 }
 
 

@@ -233,3 +233,44 @@ def test_march_script_scores_walk_and_sprint_now() -> None:
     assert by_label["march_slow"].at_least
     assert by_label["march_fast"].gesture == "sprint"
     assert by_label["march_fast"].allow == ("walk",)
+
+
+@pytest.mark.parametrize("handedness", ["right", "left"])
+def test_look_script_steps(handedness: str) -> None:
+    """Coleta da 014 T0: olhar para os 4 lados (pequeno/grande no yaw) voltando ao centro,
+    socos e marcha olhando para a tela e combinados com o olhar; nada aperta só por olhar."""
+    from tools.guided import SCRIPTS
+
+    steps = SCRIPTS["look"](handedness)
+    by_label = {s.label: s for s in steps}
+    assert len(by_label) == len(steps)  # rótulos únicos (viram LabelInterval)
+    looks = [s for s in steps if s.label.startswith("look_")]
+    assert {s.label for s in looks} == {
+        "look_left_small",
+        "look_left_big",
+        "look_right_small",
+        "look_right_big",
+        "look_up",
+        "look_down",
+    }
+    labels = [s.label for s in steps]
+    for look in looks:  # cada olhar é seguido de uma volta ao centro
+        assert labels[labels.index(look.label) + 1].startswith("center")
+    # olhar não pode apertar nada: passo pontuado com zero teclas (e rotulado)
+    assert all(s.gesture is None and s.expected == 0 for s in looks)
+    assert all(s.expected == 0 for s in steps if s.label.startswith(("rest", "center")))
+    assert by_label["punch_dominant"].gesture == "attack"
+    assert by_label["punch_other"].gesture == "use"
+    assert by_label["punch_look"].gesture == "attack"
+    assert by_label["punch_look"].expected == 3
+    assert by_label["march_fast"].gesture == "sprint"
+    assert by_label["march_fast"].allow == ("walk",)
+    assert by_label["march_look"].gesture == "walk"
+    assert by_label["march_look"].at_least
+    dominant = "DIREITO" if handedness == "right" else "ESQUERDO"
+    assert dominant in by_label["punch_dominant"].title
+    assert dominant in by_label["punch_look"].title
+    # cabe na tela a ~2 m: nenhum título maior que o do posicionamento, comum aos roteiros
+    assert all(len(s.title) <= len(steps[0].title) for s in steps)
+    sched = Schedule(steps)
+    assert {lab.gesture for lab in step_labels(sched)} == set(labels) - {"setup"}
