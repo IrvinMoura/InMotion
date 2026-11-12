@@ -100,10 +100,13 @@ def _face(
     *,
     yaw: float = 0.0,
     pitch: float = 0.0,
-    center_px: tuple[float, float] = (320.0, 120.0),
-    ear_px: float = 40.0,
+    ear_px: float | None = None,
+    scale: float = 1.0,
+    hip_x_px: float = 320.0,
+    hip_y_px: float = 300.0,
 ) -> PoseFrame:
-    return with_face(make_body(), yaw=yaw, pitch=pitch, center_px=center_px, ear_px=ear_px)
+    body = make_body(scale=scale, hip_x_px=hip_x_px, hip_y_px=hip_y_px)
+    return with_face(body, yaw=yaw, pitch=pitch, ear_px=ear_px)
 
 
 def _settled(params: HeadLookParams, hz: float = 30.0) -> tuple[HeadLook, float]:
@@ -131,14 +134,15 @@ def _look(params: HeadLookParams, head: HeadPose, hz: float, seconds: float) -> 
     st.floats(min_value=-0.8, max_value=0.8),
     st.floats(min_value=-0.5, max_value=0.5),
     st.floats(min_value=100.0, max_value=540.0),
-    st.floats(min_value=80.0, max_value=400.0),
-    st.floats(min_value=15.0, max_value=120.0),
+    st.floats(min_value=200.0, max_value=400.0),
+    st.floats(min_value=0.4, max_value=2.5),
 )
 def test_head_pose_scale_and_translation_invariant(
-    yaw: float, pitch: float, cx: float, cy: float, ear_px: float
+    yaw: float, pitch: float, hip_x: float, hip_y: float, scale: float
 ) -> None:
-    """C6 (CA5): só o deslocamento relativo às orelhas conta, em qualquer posição e escala."""
-    pose = _face(yaw=yaw, pitch=pitch, center_px=(cx, cy), ear_px=ear_px)
+    """C6 (CA5): yaw relativo às orelhas e pitch relativo aos ombros, em qualquer posição e
+    escala (distância à câmera)."""
+    pose = _face(yaw=yaw, pitch=pitch, scale=scale, hip_x_px=hip_x, hip_y_px=hip_y)
     head = head_pose(pose, GEOMETRY, MIN_EAR_PX)
     assert head is not None
     assert head.yaw == pytest.approx(yaw, abs=1e-9)
@@ -157,17 +161,33 @@ def test_head_pose_sign_conventions() -> None:
     head = head_pose(pose, GEOMETRY, MIN_EAR_PX)
     assert head is not None
     assert head.yaw == pytest.approx(0.25)  # 10 px / 40 px entre as orelhas
-    assert head.pitch == pytest.approx(0.25)
+    assert head.pitch == pytest.approx(0.10)  # 10 px / 100 px de largura dos ombros
+
+
+def test_pitch_ignores_the_eyes() -> None:
+    """Revisão de 12/11/2026: o pitch é o nariz sobre os ombros; os olhos não entram (nem no
+    valor nem no gate de visibilidade)."""
+    base = _face(pitch=0.2)
+    lm = np.array(base.landmarks, copy=True)
+    lm[[PoseLandmark.LEFT_EYE, PoseLandmark.RIGHT_EYE], 1] += 0.05
+    lm[[PoseLandmark.LEFT_EYE, PoseLandmark.RIGHT_EYE], 3] = 0.0
+    head = head_pose(
+        PoseFrame(t=0.0, image_size=base.image_size, landmarks=lm, world=None),
+        GEOMETRY,
+        MIN_EAR_PX,
+    )
+    assert head is not None
+    assert head.pitch == pytest.approx(0.2)
 
 
 @pytest.mark.parametrize(
     "landmark",
     [
         PoseLandmark.NOSE,
-        PoseLandmark.LEFT_EYE,
-        PoseLandmark.RIGHT_EYE,
         PoseLandmark.LEFT_EAR,
         PoseLandmark.RIGHT_EAR,
+        PoseLandmark.LEFT_SHOULDER,
+        PoseLandmark.RIGHT_SHOULDER,
     ],
 )
 def test_head_pose_none_when_face_hidden(landmark: PoseLandmark) -> None:
@@ -238,18 +258,34 @@ def test_suppress_stops_both_axes() -> None:
     assert look.update(HeadPose(0.29, 0.0), t + 61 / 30.0) == (0, 0)  # sem Δt acumulado
 
 
-def test_pitch_disabled_by_default() -> None:
-    """T0 (decisão 2): o pitch fica desligado por padrão; só o yaw move."""
-    assert HeadLookParams().pitch_enabled is False
-    dx, dy = _look(HeadLookParams(yaw=LINEAR, pitch=LINEAR), HeadPose(0.5, 0.5), 30.0, 1.0)
+def test_pitch_can_be_disabled() -> None:
+    """Com ``pitch_enabled`` falso só o yaw move (era o padrão da T0, decisão 2)."""
+    params = HeadLookParams(yaw=LINEAR, pitch=LINEAR, pitch_enabled=False)
+    dx, dy = _look(params, HeadPose(0.5, 0.5), 30.0, 1.0)
     assert dx > 0
     assert dy == 0
 
 
+def test_suppress_pitch_keeps_yaw() -> None:
+    """RF5 (marcha em curso): só o pitch para; o yaw segue, e o resto do pitch zera."""
+    look, t = _settled(HeadLookParams(yaw=LINEAR, pitch=LINEAR, pitch_enabled=True))
+    total = [0, 0]
+    for i in range(1, 31):
+        dx, dy = look.update(HeadPose(0.5, 0.5), t + i / 30.0, suppress_pitch=True)
+        total[0] += dx
+        total[1] += dy
+    assert abs(total[0] - 50) <= 1
+    assert total[1] == 0
+    # ao voltar, o pitch não traz resto nem Δt acumulado: 100·0,29/30 < 1 px
+    assert look.update(HeadPose(0.0, 0.29), t + 31 / 30.0)[1] == 0
+
+
 def test_t0_defaults() -> None:
-    """Parâmetros iniciais saídos da T0 (12/11/2026, decisão 4)."""
+    """Parâmetros iniciais saídos da T0 (12/11/2026, decisão 4) e do pitch revisitado."""
     params = HeadLookParams()
     assert params.yaw == ResponseCurve(gain=1200.0, dead_zone=0.15, gamma=1.5, v_max=800.0)
+    assert params.pitch == ResponseCurve(gain=3000.0, dead_zone=0.10, gamma=1.0, v_max=600.0)
+    assert params.pitch_enabled is True
     assert params.neutral_s == 1.0
 
 

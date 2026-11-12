@@ -129,28 +129,34 @@ def with_face(
     *,
     yaw: float = 0.0,
     pitch: float = 0.0,
-    center_px: tuple[float, float] = (320.0, 120.0),
-    ear_px: float = 40.0,
+    center_px: tuple[float, float] | None = None,
+    ear_px: float | None = None,
     visibility: float = 1.0,
 ) -> PoseFrame:
     """Põe nariz, olhos e orelhas (0, 2, 5, 7, 8) na imagem com yaw/pitch exatos (spec 014).
 
     As orelhas ficam em ``center ± ear_px/2`` na horizontal; o nariz vai a ``−yaw·ear_px``
     do meio delas (``yaw > 0`` = direita da pessoa, que na imagem não espelhada fica à
-    esquerda) e ``pitch·ear_px`` acima da linha dos olhos, que fica ``ear_px/4`` acima do
-    centro. Assim ``head_pose`` devolve exatamente ``(yaw, pitch)``.
+    esquerda) e ``pitch·s`` acima do meio dos ombros, com ``s`` a largura dos ombros em
+    pixels (pitch da revisão de 12/11/2026). Assim ``head_pose`` devolve exatamente
+    ``(yaw, pitch)``. Sem ``center_px``/``ear_px``, a cabeça acompanha o corpo: centro
+    ``0,6·s`` acima dos ombros e ``ear_px = 0,4·s``.
     """
     w_img, h_img = pose.image_size
-    cx, cy = center_px
-    eye_y = cy - ear_px / 4.0
-    points = {
-        PoseLandmark.LEFT_EAR: (cx + ear_px / 2.0, cy),  # orelha esquerda da pessoa: x maior
-        PoseLandmark.RIGHT_EAR: (cx - ear_px / 2.0, cy),
-        PoseLandmark.LEFT_EYE: (cx + ear_px / 4.0, eye_y),
-        PoseLandmark.RIGHT_EYE: (cx - ear_px / 4.0, eye_y),
-        PoseLandmark.NOSE: (cx - yaw * ear_px, eye_y - pitch * ear_px),
-    }
     lm = np.array(pose.landmarks, copy=True)
+    shoulders = lm[[PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER], 0:2] * (w_img, h_img)
+    sh_x, sh_y = shoulders.mean(axis=0)
+    s = float(np.linalg.norm(shoulders[0] - shoulders[1]))
+    cx, cy = center_px if center_px is not None else (sh_x, sh_y - 0.6 * s)
+    ear = ear_px if ear_px is not None else 0.4 * s
+    eye_y = cy - ear / 4.0
+    points = {
+        PoseLandmark.LEFT_EAR: (cx + ear / 2.0, cy),  # orelha esquerda da pessoa: x maior
+        PoseLandmark.RIGHT_EAR: (cx - ear / 2.0, cy),
+        PoseLandmark.LEFT_EYE: (cx + ear / 4.0, eye_y),
+        PoseLandmark.RIGHT_EYE: (cx - ear / 4.0, eye_y),
+        PoseLandmark.NOSE: (cx - yaw * ear, sh_y - pitch * s),
+    }
     for idx, (x, y) in points.items():
         lm[idx, 0] = x / w_img
         lm[idx, 1] = y / h_img

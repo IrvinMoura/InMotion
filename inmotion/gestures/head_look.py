@@ -62,47 +62,54 @@ class ResponseCurve:
 
 @dataclass(frozen=True)
 class HeadPose:
-    """Orientação da cabeça, adimensional (deslocamento do nariz / distância das orelhas).
+    """Orientação da cabeça, adimensional.
 
-    ``yaw > 0``: cabeça virada para a direita da pessoa. ``pitch > 0``: para cima.
+    ``yaw`` em distâncias entre as orelhas, ``> 0`` = cabeça virada para a direita da pessoa;
+    ``pitch`` em larguras de ombro, ``> 0`` = nariz mais alto (olhar para cima).
     """
 
     yaw: float
     pitch: float
 
 
-_FACE = (
+_HEAD = (
     PoseLandmark.NOSE,
-    PoseLandmark.LEFT_EYE,
-    PoseLandmark.RIGHT_EYE,
     PoseLandmark.LEFT_EAR,
     PoseLandmark.RIGHT_EAR,
+    PoseLandmark.LEFT_SHOULDER,
+    PoseLandmark.RIGHT_SHOULDER,
 )
 
 
 def head_pose(pose: PoseFrame, geometry: GeometryConfig, min_ear_px: float) -> HeadPose | None:
-    """RF1: orientação da cabeça pelos pontos do rosto, em pixels (A5: ``p = diag(W, H, 1)·n``).
+    """RF1: orientação da cabeça pelo nariz, orelhas e ombros, em pixels (A5:
+    ``p = diag(W, H, 1)·n``).
 
-    - ``yaw = −(x_nariz − x̄_orelhas) / e``: o sinal é trocado porque, na imagem não
-      espelhada (ADR 0007), virar para a direita da pessoa leva o nariz para a esquerda;
-    - ``pitch = (ȳ_olhos − y_nariz) / e`` (o ``y`` da imagem cresce para baixo);
-    - ``e = ‖orelha_e − orelha_d‖₂`` (A8).
+    - ``yaw = −(x_nariz − x̄_orelhas) / e``, com ``e = ‖orelha_e − orelha_d‖₂`` (A8): o sinal
+      é trocado porque, na imagem não espelhada (ADR 0007), virar para a direita da pessoa
+      leva o nariz para a esquerda;
+    - ``pitch = (ȳ_ombros − y_nariz) / s``, com ``s = ‖ombro_e − ombro_d‖₂`` (a escala de
+      A6): a altura do nariz sobre o meio dos ombros (o ``y`` da imagem cresce para baixo).
+      Revisão de 12/11/2026: a medida pelos olhos não separava olhar para baixo do ruído.
 
     C6: as duas razões são adimensionais, invariantes a translação e escala na imagem
-    (distância à câmera). ``None`` se algum ponto do rosto está abaixo de
-    ``geometry.visibility_threshold`` ou se ``e < min_ear_px`` (de perfil, as orelhas se
-    sobrepõem e a razão explodiria).
+    (distância à câmera). ``None`` se algum ponto usado está abaixo de
+    ``geometry.visibility_threshold``, se ``e < min_ear_px`` (de perfil, as orelhas se
+    sobrepõem e a razão explodiria) ou se ``s < geometry.min_shoulder_px``.
     """
-    if not is_visible(pose, _FACE, geometry.visibility_threshold):
+    if not is_visible(pose, _HEAD, geometry.visibility_threshold):
         return None
     w, h = pose.image_size
-    px = to_pixels(pose.landmarks[list(_FACE), 0:2], w, h)
-    nose, left_eye, right_eye, left_ear, right_ear = px
+    px = to_pixels(pose.landmarks[list(_HEAD), 0:2], w, h)
+    nose, left_ear, right_ear, left_shoulder, right_shoulder = px
     ears = float(np.linalg.norm(left_ear - right_ear))
+    shoulders = float(np.linalg.norm(left_shoulder - right_shoulder))
     if not (math.isfinite(ears) and ears >= min_ear_px):
         return None
+    if not (math.isfinite(shoulders) and shoulders >= geometry.min_shoulder_px):
+        return None
     yaw = -(nose[0] - (left_ear[0] + right_ear[0]) / 2.0) / ears
-    pitch = ((left_eye[1] + right_eye[1]) / 2.0 - nose[1]) / ears
+    pitch = ((left_shoulder[1] + right_shoulder[1]) / 2.0 - nose[1]) / shoulders
     return HeadPose(yaw=float(yaw), pitch=float(pitch))
 
 
@@ -111,17 +118,18 @@ class HeadLookParams:
     """Parâmetros da câmera (spec 014 T0): curvas por eixo, neutro e pitch.
 
     ``enabled``: liga a câmera pela cabeça no app; ``neutral_s``: segundos de amostras
-    para o neutro (RF2); ``min_ear_px``: distância
-    mínima entre as orelhas para a pose valer; ``pitch_enabled`` desligado por padrão (T0,
-    decisão 2); ``invert_pitch`` troca o sentido vertical. Os valores reais vêm do YAML.
+    para o neutro (RF2); ``min_ear_px``: distância mínima entre as orelhas para a pose
+    valer; ``pitch_enabled``: liga o eixo vertical (desligado na T0, religado com a medida
+    pelos ombros em 12/11/2026); ``invert_pitch`` troca o sentido vertical. Os valores reais
+    vêm do YAML.
     """
 
     enabled: bool = True
     neutral_s: float = 1.0
     min_ear_px: float = 5.0
     yaw: ResponseCurve = ResponseCurve()
-    pitch: ResponseCurve = ResponseCurve()
-    pitch_enabled: bool = False
+    pitch: ResponseCurve = ResponseCurve(gain=3000.0, dead_zone=0.10, gamma=1.0, v_max=600.0)
+    pitch_enabled: bool = True
     invert_pitch: bool = False
 
     def __post_init__(self) -> None:
@@ -146,7 +154,8 @@ class HeadLook:
       seja o FPS.
     - **Segurança (RF5, RF6):** sem pose (``None``) ou com ``suppress`` (agachar em curso),
       devolve ``(0, 0)`` e zera o resto; sem pose, o próximo frame recomeça com ``Δt = 0``,
-      então o tempo sem pose nunca vira movimento.
+      então o tempo sem pose nunca vira movimento. ``suppress_pitch`` (marcha em curso)
+      zera só o eixo vertical e o resto dele.
     """
 
     def __init__(self, params: HeadLookParams) -> None:
@@ -162,7 +171,14 @@ class HeadLook:
         """O neutro medido, ou ``None`` enquanto ainda está medindo."""
         return self._neutral
 
-    def update(self, head: HeadPose | None, t: float, *, suppress: bool = False) -> tuple[int, int]:
+    def update(
+        self,
+        head: HeadPose | None,
+        t: float,
+        *,
+        suppress: bool = False,
+        suppress_pitch: bool = False,
+    ) -> tuple[int, int]:
         """``(dx, dy)`` inteiros em pixels para o frame em ``t`` (segundos)."""
         if head is None:
             self._rest = [0.0, 0.0]
@@ -189,7 +205,9 @@ class HeadLook:
         p = self._params
         vx = p.yaw(head.yaw - self._neutral.yaw)
         vy = 0.0
-        if p.pitch_enabled:
+        if suppress_pitch:
+            self._rest[1] = 0.0
+        elif p.pitch_enabled:
             vy = p.pitch(head.pitch - self._neutral.pitch)
             vy = vy if p.invert_pitch else -vy
         return self._integrate(0, vx * dt), self._integrate(1, vy * dt)

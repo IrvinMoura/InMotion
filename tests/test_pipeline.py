@@ -860,7 +860,7 @@ def test_head_turn_moves_the_pointer() -> None:
     _run_head(pipeline, range(NEUTRAL_FRAMES, NEUTRAL_FRAMES + 30), 0.5)
     total = sum(dx for dx, _ in fake.moves)
     assert abs(total - 50) <= 2  # 100·0,5 px/s por ~1 s
-    assert all(dy == 0 for _, dy in fake.moves)  # pitch desligado por padrão
+    assert all(dy == 0 for _, dy in fake.moves)  # a cabeça não subiu nem desceu
 
 
 def test_no_pointer_motion_when_lost_or_paused() -> None:
@@ -901,3 +901,36 @@ def test_crouch_stops_camera() -> None:
     assert fake.pressed == {"shift"}
     # só pode haver movimento antes do agachar entrar em ARMING (1º frame acima de θ_on)
     assert fake.moves == []
+
+
+def test_march_stops_pitch_but_not_yaw() -> None:
+    """RF5 (12/11/2026): com a marcha em curso o pitch para (a marcha rápida mexe no pitch
+    quase tanto quanto olhar para baixo); o yaw continua, para virar andando."""
+    look = HeadLookParams(
+        yaw=ResponseCurve(gain=100.0, dead_zone=0.0, gamma=1.0, v_max=1e6),
+        pitch=ResponseCurve(gain=100.0, dead_zone=0.0, gamma=1.0, v_max=1e6),
+    )
+    fake = FakeInputBackend()
+    safety = SafetyManager(
+        TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
+    )
+    walk = {"walk": Binding("w", GestureKind.HOLD)}
+    pipeline = Pipeline(
+        safety,
+        build_body_gestures(walk),
+        FpsMeter(window=30),
+        profile=GameProfile("teste", walk),
+        head_look=look,
+    )
+    for i in range(NEUTRAL_FRAMES):
+        pipeline.step(with_face(make_body(t=i * DT)), i * DT)
+    start = NEUTRAL_FRAMES
+    for i in range(start, start + 60):  # marcha: um joelho a cada 0,4 s, cabeça virada e alta
+        phase = (i - start) % 24
+        lift_left = 0.6 if phase < 6 else 0.0
+        lift_right = 0.6 if 12 <= phase < 18 else 0.0
+        body = make_body(t=i * DT, knee_lift_left=lift_left, knee_lift_right=lift_right)
+        pipeline.step(with_face(body, yaw=0.5, pitch=0.5), i * DT)
+    assert "w" in fake.pressed  # andando
+    assert sum(dx for dx, _ in fake.moves) > 0  # o yaw seguiu
+    assert sum(dy for _, dy in fake.moves) == 0  # o pitch parou desde o 1º passo

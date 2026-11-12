@@ -108,8 +108,11 @@ march:
 #                   menor olhar intencional 0,24 -> d = 0,15.
 #   yaw.gain:       olhar pouco ~10-30 graus/s e olhar bem ~30-100 graus/s no Minecraft
 #                   (sensibilidade padrão, ~0,15 grau/px); com 2400 passava de 160 graus/s.
-#   pitch_enabled:  desligado: olhar para baixo (-0,05 a -0,08) fica abaixo do pitch da
-#                   marcha rápida (p95 0,10-0,14) e virar para o lado já baixa o pitch.
+#   pitch:          altura do nariz sobre o meio dos ombros / largura dos ombros (> 0 =
+#                   para cima; revisão de 12/11/2026). Olhar cima +0,16, baixo -0,12 a -0,20;
+#                   socos e parado p95 <= 0,07 -> d = 0,10; gamma 1 porque os olhares são
+#                   pequenos; k 3000 dá ~27 graus/s a 0,16 e ~45 graus/s a 0,20.
+#                   Para durante a marcha (a marcha rápida chega a 0,12) e no agachar.
 #   neutral_s:      neutro = mediana do 1º segundo em ACTIVE (início, F8, volta de LOST).
 #   min_ear_px:     de perfil as orelhas se sobrepõem; abaixo disso a pose da cabeça é None.
 # Com o agachar em curso a câmera para (a cabeça abaixa: yaw chega a 1,6).
@@ -118,8 +121,8 @@ head_look:
   neutral_s: 1.0
   min_ear_px: 5.0
   yaw: {gain: 1200.0, dead_zone: 0.15, gamma: 1.5, v_max: 800.0}
-  pitch: {gain: 1200.0, dead_zone: 0.15, gamma: 1.5, v_max: 800.0}
-  pitch_enabled: false
+  pitch: {gain: 3000.0, dead_zone: 0.10, gamma: 1.0, v_max: 600.0}
+  pitch_enabled: true
   invert_pitch: false
 
 # ActionMapper: duração do tap de um gesto trigger (> 1 tick de 50 ms do Minecraft).

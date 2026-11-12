@@ -197,18 +197,22 @@ class Pipeline:
         if self._combo is not None:
             events.extend(self._combo.derive(events, t))
         self._mapper.handle(self._arbiter.resolve(events, t), t)
-        return self._look(pose, t)
+        return self._look(pose, t, marching=march.steps > 0)
 
-    def _look(self, pose: PoseFrame, t: float) -> tuple[int, int]:
+    def _look(self, pose: PoseFrame, t: float, *, marching: bool) -> tuple[int, int]:
         """Spec 014: ``head_pose`` → ``HeadLook`` → ``move_rel``, só em ACTIVE com pose.
 
         Fora do árbitro (a câmera sempre passa, spec 017). RF5: com o agachar em ARMING ou
-        ACTIVE (estado já atualizado neste frame) a câmera para nos dois eixos. O movimento
-        vai pelo ``TrackedInput``, que também o descarta se o input estiver desabilitado.
+        ACTIVE (estado já atualizado neste frame) a câmera para nos dois eixos; com a marcha
+        em curso (``marching``: algum passo dentro do prazo, spec 018) só o pitch para. O
+        movimento vai pelo ``TrackedInput``, que também o descarta se o input estiver
+        desabilitado.
         """
         if self._head_look is None or self._head_look_params is None:
             return (0, 0)
         head = head_pose(pose, self._geometry, self._head_look_params.min_ear_px)
-        dx, dy = self._head_look.update(head, t, suppress=self._crouch_in_progress())
+        dx, dy = self._head_look.update(
+            head, t, suppress=self._crouch_in_progress(), suppress_pitch=marching
+        )
         self._safety.input.move_rel(dx, dy)
         return (dx, dy)
