@@ -89,7 +89,6 @@ def test_invalid_parameters(kwargs: dict[str, float]) -> None:
 # Spec 014 T1: orientação da cabeça (RF1, C6) e HeadLook (RF2, C5, RF5, RF6).
 # ---------------------------------------------------------------------------
 
-NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 014 T1")
 GEOMETRY = GeometryConfig()
 MIN_EAR_PX = HeadLookParams().min_ear_px
 # Curva linear sem zona morta nem limite prático: v = 100·x px/s, fácil de integrar à mão.
@@ -184,7 +183,6 @@ def test_head_pose_none_when_ears_too_close() -> None:
     assert head_pose(_face(ear_px=MIN_EAR_PX / 2.0), GEOMETRY, MIN_EAR_PX) is None
 
 
-@NOT_YET
 @pytest.mark.parametrize("hz", [30.0, 60.0, 47.0])
 def test_fps_independent_displacement(hz: float) -> None:
     """C5 (CA2): 1 s com ``x`` constante dá ``v·1 s`` em qualquer FPS, ± 1 px."""
@@ -194,7 +192,6 @@ def test_fps_independent_displacement(hz: float) -> None:
     assert abs(dy - (-30)) <= 1  # cabeça para cima → ponteiro para cima (dy < 0)
 
 
-@NOT_YET
 def test_irregular_frame_times_keep_total_displacement() -> None:
     """C5 com ``Δt`` irregular: o resto fracionário não se perde."""
     look, t = _settled(HeadLookParams(yaw=LINEAR, pitch=LINEAR))
@@ -206,7 +203,6 @@ def test_irregular_frame_times_keep_total_displacement() -> None:
     assert abs(total - 100.0 * 0.2 * (t - start)) <= 1.0
 
 
-@NOT_YET
 def test_neutral_measured_after_reset() -> None:
     """RF2 (CA3): ``(0, 0)`` até ``neutral_s``; a postura do neutro não move; o ``reset``
     mede de novo."""
@@ -226,7 +222,6 @@ def test_neutral_measured_after_reset() -> None:
     assert moved > 0  # agora o neutro é (0, 0) e a postura virada move
 
 
-@NOT_YET
 def test_lost_pose_zeroes_accumulator() -> None:
     """RF6: sem pose → ``(0, 0)`` e o resto zera; o tempo sem pose não vira ``Δt``."""
     look, t = _settled(HeadLookParams(yaw=LINEAR, pitch=LINEAR))
@@ -235,7 +230,6 @@ def test_lost_pose_zeroes_accumulator() -> None:
     assert look.update(HeadPose(0.29, 0.0), t + 2.0) == (0, 0)
 
 
-@NOT_YET
 def test_suppress_stops_both_axes() -> None:
     """RF5: agachar em curso para a câmera nos dois eixos e zera o resto."""
     look, t = _settled(HeadLookParams(yaw=LINEAR, pitch=LINEAR, pitch_enabled=True))
@@ -244,7 +238,6 @@ def test_suppress_stops_both_axes() -> None:
     assert look.update(HeadPose(0.29, 0.0), t + 61 / 30.0) == (0, 0)  # sem Δt acumulado
 
 
-@NOT_YET
 def test_pitch_disabled_by_default() -> None:
     """T0 (decisão 2): o pitch fica desligado por padrão; só o yaw move."""
     assert HeadLookParams().pitch_enabled is False
@@ -258,3 +251,25 @@ def test_t0_defaults() -> None:
     params = HeadLookParams()
     assert params.yaw == ResponseCurve(gain=1200.0, dead_zone=0.15, gamma=1.5, v_max=800.0)
     assert params.neutral_s == 1.0
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"neutral_s": 0.0}, {"neutral_s": math.inf}, {"min_ear_px": 0.0}]
+)
+def test_invalid_head_look_params(kwargs: dict[str, float]) -> None:
+    with pytest.raises(ValueError, match="deve"):
+        HeadLookParams(**kwargs)
+
+
+def test_neutral_is_the_median_of_the_window() -> None:
+    """RF2: um pico isolado durante a medição não desloca o neutro (mediana)."""
+    look = HeadLook(HeadLookParams(yaw=LINEAR, pitch=LINEAR))
+    for i in range(31):
+        look.update(HeadPose(0.9 if i == 5 else 0.1, 0.0), i / 30.0)
+    assert look.neutral is not None
+    assert look.neutral.yaw == pytest.approx(0.1)
+
+
+def test_invert_pitch_flips_vertical() -> None:
+    params = HeadLookParams(yaw=LINEAR, pitch=LINEAR, pitch_enabled=True, invert_pitch=True)
+    assert _look(params, HeadPose(0.0, 0.3), 30.0, 1.0)[1] == pytest.approx(30, abs=1)

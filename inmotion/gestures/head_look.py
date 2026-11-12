@@ -8,6 +8,7 @@ entre as orelhas) em velocidade do ponteiro (px/s), com zona morta, expoente e l
 from __future__ import annotations
 
 import math
+import statistics
 from dataclasses import dataclass
 
 import numpy as np
@@ -107,7 +108,12 @@ def head_pose(pose: PoseFrame, geometry: GeometryConfig, min_ear_px: float) -> H
 
 @dataclass(frozen=True)
 class HeadLookParams:
-    """Parâmetros da câmera (spec 014 T0): curvas por eixo, neutro e pitch."""
+    """Parâmetros da câmera (spec 014 T0): curvas por eixo, neutro e pitch.
+
+    ``neutral_s``: segundos de amostras para o neutro (RF2); ``min_ear_px``: distância
+    mínima entre as orelhas para a pose valer; ``pitch_enabled`` desligado por padrão (T0,
+    decisão 2); ``invert_pitch`` troca o sentido vertical. Os valores reais vêm do YAML.
+    """
 
     neutral_s: float = 1.0
     min_ear_px: float = 5.0
@@ -116,15 +122,87 @@ class HeadLookParams:
     pitch_enabled: bool = False
     invert_pitch: bool = False
 
+    def __post_init__(self) -> None:
+        """Valida: ``neutral_s`` e ``min_ear_px`` finitos e > 0."""
+        if not (math.isfinite(self.neutral_s) and self.neutral_s > 0.0):
+            raise ValueError(f"neutral_s deve ser finito e > 0: {self.neutral_s}")
+        if not (math.isfinite(self.min_ear_px) and self.min_ear_px > 0.0):
+            raise ValueError(f"min_ear_px deve ser finito e > 0: {self.min_ear_px}")
+
 
 class HeadLook:
-    """Câmera em controle de velocidade: neutro automático (RF2), curva (RF3), C5."""
+    """Câmera em controle de velocidade a partir da ``HeadPose`` de cada frame.
+
+    - **Neutro (RF2):** depois de criado ou de ``reset()``, as poses dos primeiros
+      ``neutral_s`` segundos são guardadas e o neutro ``(yaw₀, pitch₀)`` é a mediana delas;
+      até lá devolve ``(0, 0)``.
+    - **Velocidade (RF3):** ``v = curva(pose − neutro)`` por eixo (C1-C4). No eixo
+      vertical o sinal é trocado (cabeça para cima → ponteiro para cima, ``dy < 0``),
+      salvo ``invert_pitch``; com ``pitch_enabled`` falso, ``dy = 0``.
+    - **Integração (C5):** ``Δ = v·Δt + r`` e ``r ← Δ − trunc(Δ)``, de modo que a soma dos
+      ``(dx, dy)`` inteiros num intervalo fica a menos de 1 px de ``∫v dt``, qualquer que
+      seja o FPS.
+    - **Segurança (RF5, RF6):** sem pose (``None``) ou com ``suppress`` (agachar em curso),
+      devolve ``(0, 0)`` e zera o resto; sem pose, o próximo frame recomeça com ``Δt = 0``,
+      então o tempo sem pose nunca vira movimento.
+    """
 
     def __init__(self, params: HeadLookParams) -> None:
-        raise NotImplementedError
+        self._params = params
+        self._samples: list[HeadPose] = []
+        self._t0: float | None = None
+        self._neutral: HeadPose | None = None
+        self._last_t: float | None = None
+        self._rest = [0.0, 0.0]
+
+    @property
+    def neutral(self) -> HeadPose | None:
+        """O neutro medido, ou ``None`` enquanto ainda está medindo."""
+        return self._neutral
 
     def update(self, head: HeadPose | None, t: float, *, suppress: bool = False) -> tuple[int, int]:
-        raise NotImplementedError
+        """``(dx, dy)`` inteiros em pixels para o frame em ``t`` (segundos)."""
+        if head is None:
+            self._rest = [0.0, 0.0]
+            self._last_t = None
+            return (0, 0)
+        if suppress:
+            self._rest = [0.0, 0.0]
+            self._last_t = t
+            return (0, 0)
+        if self._neutral is None:
+            if self._t0 is None:
+                self._t0 = t
+            if t - self._t0 < self._params.neutral_s or not self._samples:
+                self._samples.append(head)
+                self._last_t = t
+                return (0, 0)
+            self._neutral = HeadPose(
+                yaw=statistics.median(s.yaw for s in self._samples),
+                pitch=statistics.median(s.pitch for s in self._samples),
+            )
+            self._samples = []
+        dt = 0.0 if self._last_t is None else max(0.0, t - self._last_t)
+        self._last_t = t
+        p = self._params
+        vx = p.yaw(head.yaw - self._neutral.yaw)
+        vy = 0.0
+        if p.pitch_enabled:
+            vy = p.pitch(head.pitch - self._neutral.pitch)
+            vy = vy if p.invert_pitch else -vy
+        return self._integrate(0, vx * dt), self._integrate(1, vy * dt)
 
     def reset(self) -> None:
-        raise NotImplementedError
+        """Esquece neutro, amostras, resto e último ``t`` (volta a ACTIVE: mede de novo)."""
+        self._samples = []
+        self._t0 = None
+        self._neutral = None
+        self._last_t = None
+        self._rest = [0.0, 0.0]
+
+    def _integrate(self, axis: int, delta: float) -> int:
+        """C5: soma o resto do eixo, devolve a parte inteira e guarda a fração."""
+        total = delta + self._rest[axis]
+        whole = math.trunc(total)
+        self._rest[axis] = total - whole
+        return whole
