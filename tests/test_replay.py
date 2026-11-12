@@ -345,14 +345,15 @@ STILL_GESTURE_FIXTURES = (
 )
 
 
-def _camera_deg(name: str) -> dict[str, float]:
-    """Rotação acumulada da câmera (graus, > 0 = para a direita) em cada passo rotulado."""
+def _camera_deg(name: str, axis: int = 0) -> dict[str, float]:
+    """Rotação acumulada da câmera (graus) em cada passo rotulado: ``axis`` 0 = horizontal
+    (> 0 = para a direita), 1 = vertical (> 0 = para baixo)."""
     rec, result = _run_like_app(name)
     assert result.snapshots is not None
     turns: dict[str, float] = {}
     for lab in rec.labels:
-        dx = sum(s.look[0] for s in result.snapshots if lab.start <= s.t <= lab.end)
-        turns[lab.gesture] = dx * DEG_PER_PX
+        d = sum(s.look[axis] for s in result.snapshots if lab.start <= s.t <= lab.end)
+        turns[lab.gesture] = d * DEG_PER_PX
     return turns
 
 
@@ -379,5 +380,44 @@ def test_head_look_drift_during_gestures(name: str) -> None:
     turns = _camera_deg(name)
     for label, deg in turns.items():
         if label == "jump" and name == "march_1m5.npz":
+            continue
+        assert abs(deg) <= MAX_DRIFT_DEG, (label, deg)
+
+
+# Pitch pela altura do nariz sobre os ombros (T7b, 12/11/2026). `look_pitch_*`: recortes das
+# mesmas sessões da T0 com olhar para cima, centro, olhar para baixo, centro.
+PITCH_FIXTURES = ("look_pitch_2m.npz", "look_pitch_1m5.npz")
+# Limitações conhecidas do pitch (replay de 12/11/2026), fora da checagem de deriva:
+# - `lean`: inclinar o tronco para frente baixa o nariz em relação aos ombros (+163 a +207
+#   graus nas fixtures do agachar); o Minecraft não usa o gesto hoje, revisitar na spec 019;
+# - `jump` de `march_2m` (−50 graus) e `rest_mid2` de `march_2m_dropped` (+38 graus): a cabeça
+#   sobe/desce logo depois da marcha; nas 18 sessões com pulo a mediana é 0.
+PITCH_KNOWN = {
+    ("crouch_2m.npz", "lean"),
+    ("crouch_1m5.npz", "lean"),
+    ("march_2m.npz", "jump"),
+    ("march_2m_dropped.npz", "rest_mid2"),
+}
+
+
+@pytest.mark.parametrize("name", PITCH_FIXTURES)
+def test_head_look_pitch_up_and_down(name: str) -> None:
+    """CA6 (pitch): olhar para cima sobe a câmera, para baixo desce; no centro, nada."""
+    turns = _camera_deg(name, axis=1)
+    assert turns["look_up"] <= -MIN_LOOK_DEG
+    assert turns["look_down"] >= MIN_LOOK_DEG
+    for label in ("center_5", "center_6"):
+        assert abs(turns[label]) <= MAX_DRIFT_DEG
+
+
+@pytest.mark.parametrize(
+    "name",
+    [*LOOK_FIXTURES, *STILL_GESTURE_FIXTURES, "march_2m_burst.npz", "march_2m_dropped.npz"],
+)
+def test_head_look_pitch_drift_during_gestures(name: str) -> None:
+    """CA6 (pitch): olhar para os lados, socar, marchar (pitch parado), agachar (câmera
+    parada) e ficar parado não sobem nem descem a câmera, fora as limitações conhecidas."""
+    for label, deg in _camera_deg(name, axis=1).items():
+        if (name, label) in PITCH_KNOWN:
             continue
         assert abs(deg) <= MAX_DRIFT_DEG, (label, deg)
