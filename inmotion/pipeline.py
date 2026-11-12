@@ -13,6 +13,7 @@ from inmotion.gestures.base import GestureState
 from inmotion.gestures.body import BodyGesture, all_idle
 from inmotion.gestures.factory import build_arbiter
 from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context, knee_lift
+from inmotion.gestures.head_look import HeadLook, HeadLookParams, head_pose
 from inmotion.gestures.march import MarchParams, MarchTracker
 from inmotion.mapping import ActionMapper, MapperParams
 from inmotion.safety import SafetyManager, SafetyState
@@ -43,6 +44,7 @@ class StepResult:
     safety_state: SafetyState
     pose: PoseFrame | None
     exit_zone: ExitZoneState | None = None
+    look: tuple[int, int] = (0, 0)  # spec 014: (dx, dy) da câmera enviado neste frame
 
 
 class Pipeline:
@@ -67,6 +69,7 @@ class Pipeline:
         baseline_params: BaselineParams | None = None,
         march_params: MarchParams | None = None,
         geometry: GeometryConfig | None = None,
+        head_look: HeadLookParams | None = None,
     ) -> None:
         self._safety = safety
         self._gestures = tuple(gestures)
@@ -80,6 +83,8 @@ class Pipeline:
             BodyBaseline(baseline_params or BaselineParams()),
         )
         self._march = MarchTracker(march_params or MarchParams())  # spec 018
+        self._head_look_params = head_look  # spec 014: None = sem câmera pela cabeça
+        self._head_look = HeadLook(head_look) if head_look is not None else None
         self._crouch = next((g for g in self._gestures if g.name == _CROUCH), None)
         self._arbiter, self._combo = build_arbiter(
             [g.name for g in self._gestures], profile.arbiter
@@ -135,13 +140,18 @@ class Pipeline:
                 pose = self._pose_filter(pose)
             else:
                 self._pose_filter.reset()  # sem pose ou fora de ACTIVE: recomeça limpo
+        look = (0, 0)
         if active:
             if pose is not None:
-                self._run_gestures(pose, t)
+                look = self._run_gestures(pose, t)
             else:
                 self._mapper.update(t)
+                if self._head_look is not None:
+                    self._head_look.update(None, t)  # RF6: zera o resto, sem Δt na volta
         fps = self._fps.update(t)
-        return StepResult(t=t, fps=fps, safety_state=state, pose=raw if pose is None else pose)
+        return StepResult(
+            t=t, fps=fps, safety_state=state, pose=raw if pose is None else pose, look=look
+        )
 
     def _crouch_in_progress(self) -> bool:
         """RF4: o agachar está em ARMING ou ACTIVE e a segurança ainda está em ACTIVE.
@@ -165,9 +175,12 @@ class Pipeline:
         for knee_baseline in self._knee_baselines:
             knee_baseline.reset()
         self._march.reset()
+        if self._head_look is not None:
+            self._head_look.reset()  # RF2: o neutro é medido de novo a cada volta a ACTIVE
 
-    def _run_gestures(self, pose: PoseFrame, t: float) -> None:
-        """Repouso (estado do frame anterior) → contexto → marcha → gestos → árbitro → mapper."""
+    def _run_gestures(self, pose: PoseFrame, t: float) -> tuple[int, int]:
+        """Repouso (estado do frame anterior) → contexto → marcha → gestos → árbitro → mapper
+        → câmera. Devolve o ``(dx, dy)`` da câmera enviado no frame."""
         resting = all_idle(self._gestures)
         ctx = build_context(
             pose,
@@ -184,3 +197,18 @@ class Pipeline:
         if self._combo is not None:
             events.extend(self._combo.derive(events, t))
         self._mapper.handle(self._arbiter.resolve(events, t), t)
+        return self._look(pose, t)
+
+    def _look(self, pose: PoseFrame, t: float) -> tuple[int, int]:
+        """Spec 014: ``head_pose`` → ``HeadLook`` → ``move_rel``, só em ACTIVE com pose.
+
+        Fora do árbitro (a câmera sempre passa, spec 017). RF5: com o agachar em ARMING ou
+        ACTIVE (estado já atualizado neste frame) a câmera para nos dois eixos. O movimento
+        vai pelo ``TrackedInput``, que também o descarta se o input estiver desabilitado.
+        """
+        if self._head_look is None or self._head_look_params is None:
+            return (0, 0)
+        head = head_pose(pose, self._geometry, self._head_look_params.min_ear_px)
+        dx, dy = self._head_look.update(head, t, suppress=self._crouch_in_progress())
+        self._safety.input.move_rel(dx, dy)
+        return (dx, dy)

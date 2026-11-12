@@ -29,10 +29,10 @@ class ResponseCurve:
     ``±inf`` vira ``±v_max``.
     """
 
-    gain: float = 1500.0
-    dead_zone: float = 0.08
+    gain: float = 1200.0  # padrões da T0 (12/11/2026); os valores reais vêm do YAML
+    dead_zone: float = 0.15
     gamma: float = 1.5
-    v_max: float = 1200.0
+    v_max: float = 800.0
 
     def __post_init__(self) -> None:
         """Valida: ganho > 0, zona morta ≥ 0, gamma ≥ 1, v_max > 0, todos finitos."""
@@ -110,15 +110,17 @@ def head_pose(pose: PoseFrame, geometry: GeometryConfig, min_ear_px: float) -> H
 class HeadLookParams:
     """Parâmetros da câmera (spec 014 T0): curvas por eixo, neutro e pitch.
 
-    ``neutral_s``: segundos de amostras para o neutro (RF2); ``min_ear_px``: distância
+    ``enabled``: liga a câmera pela cabeça no app; ``neutral_s``: segundos de amostras
+    para o neutro (RF2); ``min_ear_px``: distância
     mínima entre as orelhas para a pose valer; ``pitch_enabled`` desligado por padrão (T0,
     decisão 2); ``invert_pitch`` troca o sentido vertical. Os valores reais vêm do YAML.
     """
 
+    enabled: bool = True
     neutral_s: float = 1.0
     min_ear_px: float = 5.0
-    yaw: ResponseCurve = ResponseCurve(gain=1200.0, dead_zone=0.15, gamma=1.5, v_max=800.0)
-    pitch: ResponseCurve = ResponseCurve(gain=1200.0, dead_zone=0.15, gamma=1.5, v_max=800.0)
+    yaw: ResponseCurve = ResponseCurve()
+    pitch: ResponseCurve = ResponseCurve()
     pitch_enabled: bool = False
     invert_pitch: bool = False
 

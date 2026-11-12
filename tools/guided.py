@@ -527,6 +527,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         baseline_params=config.baseline,
         march_params=config.march,
         geometry=config.geometry,
+        head_look=config.head_look if config.head_look.enabled else None,
     )
     schedule = Schedule(SCRIPTS[args.script](config.handedness))
     preprocess = Preprocessor(config.preprocess).apply

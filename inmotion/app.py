@@ -177,6 +177,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
         baseline_params=config.baseline,
         march_params=config.march,
         geometry=config.geometry,
+        head_look=config.head_look if config.head_look.enabled else None,
     )
     watchdog = Watchdog(safety_config.watchdog_timeout_s)
     exit_zone = ExitZone(deps.exit_zone) if deps.exit_zone is not None else None

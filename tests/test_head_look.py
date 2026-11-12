@@ -56,7 +56,7 @@ def test_known_values() -> None:
     assert c(-0.18) == pytest.approx(-150.0)
     assert c(0.05) == 0.0
     assert c(5.0) == 1200.0
-    assert ResponseCurve()(0.08 + 0.1) == pytest.approx(1500.0 * 0.1**1.5)
+    assert ResponseCurve()(0.15 + 0.1) == pytest.approx(1200.0 * 0.1**1.5)
 
 
 def test_non_finite_inputs() -> None:

@@ -249,6 +249,31 @@ def test_app_config_error_paths_are_full() -> None:
 
 
 @pytest.mark.parametrize(
+    ("data", "path"),
+    [
+        ({"head_look": {"neutral_s": 0}}, "head_look.neutral_s"),
+        ({"head_look": {"min_ear_px": -1}}, "head_look.min_ear_px"),
+        ({"head_look": {"yaw": {"dead_zone": -0.1}}}, "head_look.yaw.dead_zone"),
+        ({"head_look": {"yaw": {"gamma": 0.5}}}, "head_look.yaw.gamma"),
+        ({"head_look": {"pitch": {"gain": 0}}}, "head_look.pitch.gain"),
+    ],
+)
+def test_head_look_ranges_are_validated(data: dict[str, object], path: str) -> None:
+    """Spec 014 T6: as faixas de ``head_look`` (e das curvas) viram ``ConfigError`` com o
+    caminho completo."""
+    with pytest.raises(ConfigError) as exc:
+        build(AppConfig, data)
+    assert exc.value.path == path
+
+
+def test_head_look_override_from_cli() -> None:
+    """``--set head_look.yaw.gain=900`` muda só o ganho do yaw."""
+    config = build(AppConfig, {"head_look": {"yaw": {"gain": 900.0}}})
+    assert config.head_look.yaw.gain == 900.0
+    assert config.head_look.yaw.dead_zone == 0.15
+
+
+@pytest.mark.parametrize(
     ("direction", "on", "off"),
     [("below", 0.5, 0.5), ("below", 0.6, 0.5), ("above", 0.5, 0.6), ("ABOVE", 0.4, 0.4)],
 )

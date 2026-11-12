@@ -15,13 +15,14 @@ from inmotion.gestures.base import Direction, GestureEvent, GestureKind, Gesture
 from inmotion.gestures.body import BodyGesture, FeatureGesture
 from inmotion.gestures.factory import BODY_GESTURE_NAMES, build_body_gestures
 from inmotion.gestures.features import FrameContext
+from inmotion.gestures.head_look import HeadLookParams, ResponseCurve
 from inmotion.input.backend import MOUSE_BUTTONS
 from inmotion.pipeline import Pipeline
 from inmotion.safety import SafetyConfig, SafetyManager, SafetyState, TrackedInput
 from inmotion.types import PoseFrame
 from inmotion.vision.landmarks import PoseLandmark
 from tests.fakes import FakeInputBackend, make_pose
-from tests.helpers import ARM_HANGING, ARM_STRAIGHT_FORWARD, Arm, make_body
+from tests.helpers import ARM_HANGING, ARM_STRAIGHT_FORWARD, Arm, make_body, with_face
 
 SPY_PARAMS = GestureParams(0.5, 0.25, Direction.ABOVE, debounce_frames=1)
 SPY_PROFILE = GameProfile("teste", {"spy": Binding("space", GestureKind.HOLD)})
@@ -820,3 +821,83 @@ def test_fast_march_bounce_does_not_press_space_but_real_jump_does() -> None:
     for i in range(start + 40, start + 52):  # pulo real: quadril sobe 50 px, joelhos baixos
         pipeline.step(make_body(t=i * DT, hip_y_px=250.0), i * DT)
     assert [e for e in fake.events if e[1] == "space"][:1] == [("press", "space")]
+
+
+# --- Spec 014: câmera pela cabeça no pipeline (CA3, CA4, RF5) ---------------------------------
+
+# Curva linear sem zona morta: v = 100·yaw px/s, para contar o movimento à mão.
+LOOK = HeadLookParams(yaw=ResponseCurve(gain=100.0, dead_zone=0.0, gamma=1.0, v_max=1e6))
+NEUTRAL_FRAMES = 40  # > neutral_s (1 s) a 30 FPS
+
+
+def _look_pipeline(
+    gestures: list[BodyGesture] | None = None, profile: GameProfile = SPY_PROFILE
+) -> tuple[Pipeline, SafetyManager, FakeInputBackend]:
+    fake = FakeInputBackend()
+    config = SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
+    safety = SafetyManager(TrackedInput(fake, MOUSE_BUTTONS), config)
+    pipeline = Pipeline(
+        safety, gestures or [], FpsMeter(window=30), profile=profile, head_look=LOOK
+    )
+    return pipeline, safety, fake
+
+
+def _head(i: int, yaw: float, **body: float) -> PoseFrame:
+    return with_face(make_body(t=i * DT, **body), yaw=yaw)
+
+
+def _run_head(pipeline: Pipeline, frames: range, yaw: float, **body: float) -> None:
+    for i in frames:
+        pipeline.step(_head(i, yaw, **body), i * DT)
+
+
+def test_head_turn_moves_the_pointer() -> None:
+    """Neutro olhando para a tela; virar para a direita da pessoa move o ponteiro para a
+    direita, a ~v·t."""
+    pipeline, _, fake = _look_pipeline()
+    _run_head(pipeline, range(NEUTRAL_FRAMES), 0.0)
+    assert fake.moves == []
+    _run_head(pipeline, range(NEUTRAL_FRAMES, NEUTRAL_FRAMES + 30), 0.5)
+    total = sum(dx for dx, _ in fake.moves)
+    assert abs(total - 50) <= 2  # 100·0,5 px/s por ~1 s
+    assert all(dy == 0 for _, dy in fake.moves)  # pitch desligado por padrão
+
+
+def test_no_pointer_motion_when_lost_or_paused() -> None:
+    """CA4: em PAUSED e sem pose (LOST) nenhum ``move_rel`` chega ao backend."""
+    pipeline, safety, fake = _look_pipeline()
+    _run_head(pipeline, range(NEUTRAL_FRAMES), 0.0)
+    safety.on_hotkeys(frozenset({"f8"}))  # pausa
+    _run_head(pipeline, range(NEUTRAL_FRAMES, NEUTRAL_FRAMES + 30), 0.8)
+    assert fake.moves == []
+    safety.on_hotkeys(frozenset())
+    safety.on_hotkeys(frozenset({"f8"}))  # retoma
+    safety.on_hotkeys(frozenset())
+    for i in range(NEUTRAL_FRAMES + 30, NEUTRAL_FRAMES + 60):
+        pipeline.step(None, i * DT)  # sem pose
+    assert fake.moves == []
+
+
+def test_resume_measures_neutral_again() -> None:
+    """CA3: ao retomar do F8 o neutro é medido de novo; a postura de quem voltou virado não
+    gira a câmera."""
+    pipeline, safety, fake = _look_pipeline()
+    _run_head(pipeline, range(NEUTRAL_FRAMES), 0.0)
+    safety.on_hotkeys(frozenset({"f8"}))
+    _run_head(pipeline, range(NEUTRAL_FRAMES, NEUTRAL_FRAMES + 5), 0.4)
+    safety.on_hotkeys(frozenset())
+    safety.on_hotkeys(frozenset({"f8"}))
+    start = NEUTRAL_FRAMES + 5
+    _run_head(pipeline, range(start, start + 2 * NEUTRAL_FRAMES), 0.4)
+    assert fake.moves == []  # 0,4 virou o neutro novo
+
+
+def test_crouch_stops_camera() -> None:
+    """RF5: com o agachar em curso a cabeça abaixa; a câmera para nos dois eixos."""
+    pipeline, _, fake = _look_pipeline(build_body_gestures({"crouch"}), CROUCH_PROFILE)
+    _run_head(pipeline, range(NEUTRAL_FRAMES), 0.0)
+    start = NEUTRAL_FRAMES
+    _run_head(pipeline, range(start, start + 30), 0.6, shoulder_dy_px=SQUAT_DY_PX)
+    assert fake.pressed == {"shift"}
+    # só pode haver movimento antes do agachar entrar em ARMING (1º frame acima de θ_on)
+    assert fake.moves == []
