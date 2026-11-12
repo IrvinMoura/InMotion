@@ -388,3 +388,53 @@ def test_crouch_feature_from_config_selects_the_signal() -> None:
     assert ("press", "shift") not in _run_crouch(
         _crouch_poses(shoulders_drop=False), AppConfig()
     ).events
+
+
+class _FakeCv2:
+    """Imita as chamadas de janela do OpenCV usadas pelo ``OpenCvDisplay``."""
+
+    WINDOW_NORMAL = 0x0
+    WINDOW_KEEPRATIO = 0x0
+    WND_PROP_VISIBLE = 4
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    def namedWindow(self, name: str, flags: int) -> None:  # noqa: N802 - nome da API real
+        self.calls.append(("namedWindow", (name, flags)))
+
+    def resizeWindow(self, name: str, width: int, height: int) -> None:  # noqa: N802
+        self.calls.append(("resizeWindow", (name, width, height)))
+
+    def imshow(self, name: str, image: object) -> None:
+        self.calls.append(("imshow", name))
+
+    def waitKey(self, delay: int) -> int:  # noqa: N802
+        return -1
+
+    def getWindowProperty(self, name: str, prop: int) -> float:  # noqa: N802
+        return 1.0
+
+    def destroyAllWindows(self) -> None:  # noqa: N802
+        self.calls.append(("destroyAllWindows", None))
+
+
+def test_display_window_is_resizable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A janela é criada uma vez como redimensionável (``WINDOW_NORMAL``, mantendo a
+    proporção), no tamanho do frame; o usuário pode arrastá-la para dividir a tela com o jogo."""
+    import inmotion.app as app_module
+    from inmotion.pipeline import StepResult
+    from inmotion.safety import SafetyState
+
+    fake = _FakeCv2()
+    monkeypatch.setattr(app_module, "cv2", fake)
+    monkeypatch.setattr(app_module, "render", lambda image, result, handedness: image)
+    display = app_module.OpenCvDisplay("teste")
+    image = np.zeros((480, 640, 3), dtype=np.uint8)
+    result = StepResult(t=0.0, fps=None, safety_state=SafetyState.ACTIVE, pose=None)
+    assert display.show(image, result)
+    assert display.show(image, result)
+    names = [name for name, _ in fake.calls]
+    assert names.count("namedWindow") == 1
+    assert names.index("namedWindow") < names.index("imshow")
+    assert ("resizeWindow", ("teste", 640, 480)) in fake.calls

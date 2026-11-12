@@ -107,15 +107,27 @@ class AppDeps:
 
 
 class OpenCvDisplay:
-    """``Display`` sobre ``cv2.imshow``: desenha o overlay e detecta a janela fechada."""
+    """``Display`` sobre ``cv2.imshow``: desenha o overlay e detecta a janela fechada.
+
+    A janela é redimensionável (``WINDOW_NORMAL`` mantendo a proporção) e nasce no tamanho
+    do frame: dá para arrastá-la e dividir a tela com o jogo. Só muda a exibição; a
+    imagem processada continua a mesma.
+    """
 
     def __init__(self, window_name: str = WINDOW_NAME, handedness: str | None = None) -> None:
         self._name = window_name
         self._handedness = handedness  # "right" | "left": o overlay mostra o modo (spec 017)
+        self._created = False
 
     def show(self, image: NDArray[np.uint8], result: StepResult) -> bool:
         """Mostra o frame com overlay; False se a janela foi fechada."""
-        cv2.imshow(self._name, render(image, result, self._handedness))
+        frame = render(image, result, self._handedness)
+        if not self._created:
+            cv2.namedWindow(self._name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+            height, width = frame.shape[:2]
+            cv2.resizeWindow(self._name, width, height)
+            self._created = True
+        cv2.imshow(self._name, frame)
         cv2.waitKey(1)
         return bool(cv2.getWindowProperty(self._name, cv2.WND_PROP_VISIBLE) >= 1)
 
