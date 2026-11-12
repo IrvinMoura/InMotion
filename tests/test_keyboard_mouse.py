@@ -20,6 +20,20 @@ def test_init_sets_pause_zero_and_failsafe_off() -> None:
     assert api.FAILSAFE is False
 
 
+def test_move_rel_uses_relative_true() -> None:
+    """Spec 014 RF4: com ``relative=False`` o pydirectinput faria um ``moveTo`` absoluto, que
+    não funciona com o cursor capturado pelo jogo."""
+    api = FakeDirectInput()
+    KeyboardMouseBackend(api=api).move_rel(12, -3)
+    assert api.calls == [("moveRel", "12,-3,relative=True")]
+
+
+def test_zero_move_not_sent() -> None:
+    api = FakeDirectInput()
+    KeyboardMouseBackend(api=api).move_rel(0, 0)
+    assert api.calls == []
+
+
 @pytest.mark.parametrize(
     ("key", "button"),
     [("mouse_left", "left"), ("mouse_right", "right"), ("mouse_middle", "middle")],

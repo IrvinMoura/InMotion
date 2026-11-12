@@ -101,6 +101,41 @@ def test_press_ignored_when_disabled() -> None:
     assert fake.events == []
 
 
+def test_move_rel_goes_through_tracked_input() -> None:
+    """Spec 014: o movimento do mouse também passa pelo único caminho até o backend."""
+    fake = FakeInputBackend()
+    tracked = TrackedInput(fake, MOUSE_BUTTONS)
+    tracked.move_rel(5, 0)
+    tracked.move_rel(0, 0)  # nada a enviar
+    assert fake.moves == [(5, 0)]
+
+
+def test_move_rel_ignored_when_disabled() -> None:
+    """Pausa/perda desabilitam o input: nenhum movimento chega ao backend (RF6)."""
+    fake = FakeInputBackend()
+    tracked = TrackedInput(fake, MOUSE_BUTTONS)
+    tracked.set_enabled(False)
+    tracked.move_rel(5, 5)
+    assert fake.moves == []
+
+
+def test_move_rel_skipped_for_backend_without_pointer() -> None:
+    """Um backend só de teclas (ex.: o log da sessão guiada) simplesmente não move nada."""
+
+    class KeysOnly:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+
+        def press(self, key: KeyName) -> None:
+            self.events.append(key)
+
+        def release(self, key: KeyName) -> None:
+            self.events.append(key)
+
+    tracked = TrackedInput(KeysOnly(), MOUSE_BUTTONS)
+    tracked.move_rel(3, 4)  # não levanta
+
+
 # --- guard() (CA4, CA5) ------------------------------------------------------------
 
 

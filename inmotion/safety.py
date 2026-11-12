@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from inmotion.input.backend import MOUSE_BUTTONS, InputBackend, KeyName
+from inmotion.input.backend import MOUSE_BUTTONS, InputBackend, KeyName, PointerBackend
 
 _log = logging.getLogger(__name__)
 
@@ -120,6 +120,15 @@ class TrackedInput:
                 return
             self._backend.release(key)
             self._pressed.discard(key)
+
+    def move_rel(self, dx: int, dy: int) -> None:
+        """Movimento relativo do mouse (spec 014): ignorado se desabilitado (pausa/perda),
+        se ``(0, 0)`` ou se o backend não implementa ``PointerBackend``."""
+        if dx == 0 and dy == 0:
+            return
+        with self._lock:
+            if self._enabled and isinstance(self._backend, PointerBackend):
+                self._backend.move_rel(dx, dy)
 
     def release_all(self) -> None:
         """Solta P ∪ ``always_release``; sem falhas do backend, P = ∅ ao final (S4).

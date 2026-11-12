@@ -42,6 +42,17 @@ class KeyboardMouseBackend:
         else:
             self._api.keyUp(self._checked(key))
 
+    def move_rel(self, dx: int, dy: int) -> None:
+        """Movimento relativo (``PointerBackend``, spec 014 RF4); ``(0, 0)`` não é enviado.
+
+        ``relative=True`` usa ``SendInput`` com ``MOUSEEVENTF_MOVE``. O padrão
+        (``relative=False``) faria um ``moveTo`` absoluto, que não funciona num jogo que
+        captura o cursor.
+        """
+        if dx == 0 and dy == 0:
+            return
+        self._api.moveRel(dx, dy, relative=True)
+
     def supported_keys(self) -> frozenset[KeyName]:
         """Nomes aceitos por ``press``/``release``: teclas com scancode e botões do mouse."""
         keyboard = {name for name, code in self._api.KEYBOARD_MAPPING.items() if code is not None}

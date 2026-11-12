@@ -19,6 +19,7 @@ class FakeInputBackend:
         self.events: list[tuple[str, str]] = []
         self.pressed: set[str] = set()
         self.fail_on_release = set(fail_on_release)
+        self.moves: list[tuple[int, int]] = []
 
     def press(self, key: str) -> None:
         self.events.append(("press", key))
@@ -32,6 +33,10 @@ class FakeInputBackend:
 
     def released(self) -> list[str]:
         return [key for kind, key in self.events if kind == "release"]
+
+    def move_rel(self, dx: int, dy: int) -> None:
+        """Spec 014: registra o movimento relativo do mouse (``PointerBackend``)."""
+        self.moves.append((dx, dy))
 
 
 class FakeHotkeys:
@@ -70,6 +75,9 @@ class FakeDirectInput:
 
     def mouseUp(self, *, button: str) -> None:  # noqa: N802
         self.calls.append(("mouseUp", button))
+
+    def moveRel(self, dx: int, dy: int, *, relative: bool = False) -> None:  # noqa: N802
+        self.calls.append(("moveRel", f"{dx},{dy},relative={relative}"))
 
 
 class FakeUser32:

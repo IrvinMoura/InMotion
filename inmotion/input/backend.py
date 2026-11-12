@@ -4,7 +4,7 @@ Teclas e botões do mouse compartilham um único espaço de nomes (``KeyName``),
 o conjunto de "pressionados" seja um só.
 """
 
-from typing import Final, Protocol, TypeAlias
+from typing import Final, Protocol, TypeAlias, runtime_checkable
 
 KeyName: TypeAlias = str
 """Nome de tecla ou botão: ``"space"``, ``"shift"``, ``"w"``, ``"f8"``, ``"mouse_left"``..."""
@@ -18,6 +18,18 @@ class InputBackend(Protocol):
     def press(self, key: KeyName) -> None: ...
 
     def release(self, key: KeyName) -> None: ...
+
+
+@runtime_checkable
+class PointerBackend(Protocol):
+    """Move o ponteiro de forma relativa (spec 014: câmera pela cabeça).
+
+    Port separado do ``InputBackend``: movimento não fica "pressionado", então não entra
+    em P nem no ``release_all()``. Quem não move o mouse (ex.: o log da sessão guiada)
+    simplesmente não implementa este port.
+    """
+
+    def move_rel(self, dx: int, dy: int) -> None: ...
 
 
 class HotkeySource(Protocol):
