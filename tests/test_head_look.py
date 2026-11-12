@@ -128,7 +128,6 @@ def _look(params: HeadLookParams, head: HeadPose, hz: float, seconds: float) -> 
     return total[0], total[1]
 
 
-@NOT_YET
 @given(
     st.floats(min_value=-0.8, max_value=0.8),
     st.floats(min_value=-0.5, max_value=0.5),
@@ -147,7 +146,6 @@ def test_head_pose_scale_and_translation_invariant(
     assert head.pitch == pytest.approx(pitch, abs=1e-9)
 
 
-@NOT_YET
 def test_head_pose_sign_conventions() -> None:
     """Nariz à esquerda da imagem (não espelhada, ADR 0007) = cabeça para a direita da
     pessoa (``yaw > 0``); nariz para cima = ``pitch > 0`` (T0: decisão 3)."""
@@ -163,7 +161,6 @@ def test_head_pose_sign_conventions() -> None:
     assert head.pitch == pytest.approx(0.25)
 
 
-@NOT_YET
 @pytest.mark.parametrize(
     "landmark",
     [
@@ -182,7 +179,6 @@ def test_head_pose_none_when_face_hidden(landmark: PoseLandmark) -> None:
     assert head_pose(pose, GEOMETRY, MIN_EAR_PX) is None
 
 
-@NOT_YET
 def test_head_pose_none_when_ears_too_close() -> None:
     """De perfil as orelhas se sobrepõem na imagem: a razão explodiria, então é ``None``."""
     assert head_pose(_face(ear_px=MIN_EAR_PX / 2.0), GEOMETRY, MIN_EAR_PX) is None

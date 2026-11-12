@@ -10,8 +10,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+import numpy as np
+
 from inmotion.types import PoseFrame
-from inmotion.vision.geometry import GeometryConfig
+from inmotion.vision.geometry import GeometryConfig, is_visible, to_pixels
+from inmotion.vision.landmarks import PoseLandmark
 
 
 @dataclass(frozen=True)
@@ -67,11 +70,39 @@ class HeadPose:
     pitch: float
 
 
+_FACE = (
+    PoseLandmark.NOSE,
+    PoseLandmark.LEFT_EYE,
+    PoseLandmark.RIGHT_EYE,
+    PoseLandmark.LEFT_EAR,
+    PoseLandmark.RIGHT_EAR,
+)
+
+
 def head_pose(pose: PoseFrame, geometry: GeometryConfig, min_ear_px: float) -> HeadPose | None:
-    """RF1: ``yaw = −(x_nariz − x̄_orelhas)/e``, ``pitch = (ȳ_olhos − y_nariz)/e``, ``e`` =
-    distância entre as orelhas em pixels; ``None`` sem os pontos visíveis ou com ``e`` pequeno.
+    """RF1: orientação da cabeça pelos pontos do rosto, em pixels (A5: ``p = diag(W, H, 1)·n``).
+
+    - ``yaw = −(x_nariz − x̄_orelhas) / e``: o sinal é trocado porque, na imagem não
+      espelhada (ADR 0007), virar para a direita da pessoa leva o nariz para a esquerda;
+    - ``pitch = (ȳ_olhos − y_nariz) / e`` (o ``y`` da imagem cresce para baixo);
+    - ``e = ‖orelha_e − orelha_d‖₂`` (A8).
+
+    C6: as duas razões são adimensionais, invariantes a translação e escala na imagem
+    (distância à câmera). ``None`` se algum ponto do rosto está abaixo de
+    ``geometry.visibility_threshold`` ou se ``e < min_ear_px`` (de perfil, as orelhas se
+    sobrepõem e a razão explodiria).
     """
-    raise NotImplementedError
+    if not is_visible(pose, _FACE, geometry.visibility_threshold):
+        return None
+    w, h = pose.image_size
+    px = to_pixels(pose.landmarks[list(_FACE), 0:2], w, h)
+    nose, left_eye, right_eye, left_ear, right_ear = px
+    ears = float(np.linalg.norm(left_ear - right_ear))
+    if not (math.isfinite(ears) and ears >= min_ear_px):
+        return None
+    yaw = -(nose[0] - (left_ear[0] + right_ear[0]) / 2.0) / ears
+    pitch = ((left_eye[1] + right_eye[1]) / 2.0 - nose[1]) / ears
+    return HeadPose(yaw=float(yaw), pitch=float(pitch))
 
 
 @dataclass(frozen=True)
