@@ -122,3 +122,37 @@ def make_body(
             if with_world:
                 world[hip, 3] = 0.0
     return PoseFrame(t=t, image_size=size, landmarks=lm, world=world if with_world else None)
+
+
+def with_face(
+    pose: PoseFrame,
+    *,
+    yaw: float = 0.0,
+    pitch: float = 0.0,
+    center_px: tuple[float, float] = (320.0, 120.0),
+    ear_px: float = 40.0,
+    visibility: float = 1.0,
+) -> PoseFrame:
+    """Põe nariz, olhos e orelhas (0, 2, 5, 7, 8) na imagem com yaw/pitch exatos (spec 014).
+
+    As orelhas ficam em ``center ± ear_px/2`` na horizontal; o nariz vai a ``−yaw·ear_px``
+    do meio delas (``yaw > 0`` = direita da pessoa, que na imagem não espelhada fica à
+    esquerda) e ``pitch·ear_px`` acima da linha dos olhos, que fica ``ear_px/4`` acima do
+    centro. Assim ``head_pose`` devolve exatamente ``(yaw, pitch)``.
+    """
+    w_img, h_img = pose.image_size
+    cx, cy = center_px
+    eye_y = cy - ear_px / 4.0
+    points = {
+        PoseLandmark.LEFT_EAR: (cx + ear_px / 2.0, cy),  # orelha esquerda da pessoa: x maior
+        PoseLandmark.RIGHT_EAR: (cx - ear_px / 2.0, cy),
+        PoseLandmark.LEFT_EYE: (cx + ear_px / 4.0, eye_y),
+        PoseLandmark.RIGHT_EYE: (cx - ear_px / 4.0, eye_y),
+        PoseLandmark.NOSE: (cx - yaw * ear_px, eye_y - pitch * ear_px),
+    }
+    lm = np.array(pose.landmarks, copy=True)
+    for idx, (x, y) in points.items():
+        lm[idx, 0] = x / w_img
+        lm[idx, 1] = y / h_img
+        lm[idx, 3] = visibility
+    return PoseFrame(t=pose.t, image_size=pose.image_size, landmarks=lm, world=pose.world)

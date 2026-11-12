@@ -1,13 +1,17 @@
-"""Olhar com a cabeça: curva de resposta não linear (C1-C4) da spec 014.
+"""Olhar com a cabeça (spec 014): orientação pelos pontos do rosto e câmera por velocidade.
 
 Converte o deslocamento normalizado do nariz (adimensional: deslocamento / distância
-entre as orelhas) em velocidade do ponteiro (px/s), com zona morta, expoente e limite.
+entre as orelhas) em velocidade do ponteiro (px/s), com zona morta, expoente e limite
+(C1-C4), e integra ``v·Δt`` com resto fracionário (C5). Núcleo puro: o tempo é ``t``.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+
+from inmotion.types import PoseFrame
+from inmotion.vision.geometry import GeometryConfig
 
 
 @dataclass(frozen=True)
@@ -50,3 +54,46 @@ class ResponseCurve:
         except OverflowError:
             speed = self.v_max
         return math.copysign(speed, x)
+
+
+@dataclass(frozen=True)
+class HeadPose:
+    """Orientação da cabeça, adimensional (deslocamento do nariz / distância das orelhas).
+
+    ``yaw > 0``: cabeça virada para a direita da pessoa. ``pitch > 0``: para cima.
+    """
+
+    yaw: float
+    pitch: float
+
+
+def head_pose(pose: PoseFrame, geometry: GeometryConfig, min_ear_px: float) -> HeadPose | None:
+    """RF1: ``yaw = −(x_nariz − x̄_orelhas)/e``, ``pitch = (ȳ_olhos − y_nariz)/e``, ``e`` =
+    distância entre as orelhas em pixels; ``None`` sem os pontos visíveis ou com ``e`` pequeno.
+    """
+    raise NotImplementedError
+
+
+@dataclass(frozen=True)
+class HeadLookParams:
+    """Parâmetros da câmera (spec 014 T0): curvas por eixo, neutro e pitch."""
+
+    neutral_s: float = 1.0
+    min_ear_px: float = 5.0
+    yaw: ResponseCurve = ResponseCurve(gain=1200.0, dead_zone=0.15, gamma=1.5, v_max=800.0)
+    pitch: ResponseCurve = ResponseCurve(gain=1200.0, dead_zone=0.15, gamma=1.5, v_max=800.0)
+    pitch_enabled: bool = False
+    invert_pitch: bool = False
+
+
+class HeadLook:
+    """Câmera em controle de velocidade: neutro automático (RF2), curva (RF3), C5."""
+
+    def __init__(self, params: HeadLookParams) -> None:
+        raise NotImplementedError
+
+    def update(self, head: HeadPose | None, t: float, *, suppress: bool = False) -> tuple[int, int]:
+        raise NotImplementedError
+
+    def reset(self) -> None:
+        raise NotImplementedError
