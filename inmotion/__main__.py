@@ -187,7 +187,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             backend=backend,
             hotkeys=hotkeys,
             clock=clock,
-            display=OpenCvDisplay(handedness=config.handedness) if config.overlay.enabled else None,
+            display=(
+                OpenCvDisplay(handedness=config.handedness, mirror=config.overlay.mirror)
+                if config.overlay.enabled
+                else None
+            ),
             pose_filter=pose_filter_from_config(config.filters),
             exit_zone=config.exit_zone,
             config=config,

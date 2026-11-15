@@ -39,4 +39,4 @@ def crouch_gesture(
     """
     if feature not in _FEATURES:
         raise ValueError(f"feature deve ser um de {CROUCH_FEATURES}, recebido {feature!r}")
-    return FeatureGesture("crouch", GestureKind.HOLD, params, _FEATURES[feature])
+    return FeatureGesture("crouch", GestureKind.HOLD, params, _FEATURES[feature], pure=True)

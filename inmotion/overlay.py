@@ -1,6 +1,7 @@
-"""Overlay mínimo de debug: FPS, estado de segurança e pontos da pose (adaptador).
+"""Overlay de debug (spec 009): esqueleto conectado, normalizado (M=S*R*T), telemetria e A4.
 
-Só lê o ``StepResult``; nunca decide nada. Expandido na spec 009.
+Só lê o ``StepResult``; nunca decide nada. Mantém compatibilidade com imagens pequenas nos
+testes legados (elementos avançados só desenham quando presentes no ``StepResult``).
 """
 
 from __future__ import annotations
@@ -10,8 +11,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from inmotion.exit_zone import ExitZoneState
-from inmotion.pipeline import StepResult
+from inmotion.gestures.base import GestureState
+from inmotion.pipeline import GestureTelemetry, StepResult
 from inmotion.safety import SafetyState
+from inmotion.types import PoseFrame
+from inmotion.vision.geometry import NormalizedSkeleton
+from inmotion.vision.landmarks import PoseLandmark
 
 # Hershey só desenha ASCII: sem acentos nos textos do overlay.
 _STATE_TEXT = {
@@ -19,8 +24,41 @@ _STATE_TEXT = {
     SafetyState.PAUSED: ("PAUSADO", (0, 200, 255)),
     SafetyState.LOST: ("SEM POSE", (0, 0, 255)),
 }
+_GESTURE_STATE_STYLE: dict[GestureState, tuple[str, tuple[int, int, int]]] = {
+    GestureState.IDLE: ("IDL", (170, 170, 170)),
+    GestureState.ARMING: ("ARM", (0, 210, 255)),
+    GestureState.ACTIVE: ("ACT", (60, 230, 80)),
+    GestureState.COOLDOWN: ("CLD", (255, 170, 60)),
+}
+POSE_CONNECTIONS: tuple[tuple[PoseLandmark, PoseLandmark], ...] = (
+    (PoseLandmark.NOSE, PoseLandmark.LEFT_EYE),
+    (PoseLandmark.NOSE, PoseLandmark.RIGHT_EYE),
+    (PoseLandmark.LEFT_EYE, PoseLandmark.LEFT_EAR),
+    (PoseLandmark.RIGHT_EYE, PoseLandmark.RIGHT_EAR),
+    (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER),
+    (PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_HIP),
+    (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_HIP),
+    (PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP),
+    (PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_ELBOW),
+    (PoseLandmark.LEFT_ELBOW, PoseLandmark.LEFT_WRIST),
+    (PoseLandmark.LEFT_WRIST, PoseLandmark.LEFT_INDEX),
+    (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW),
+    (PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST),
+    (PoseLandmark.RIGHT_WRIST, PoseLandmark.RIGHT_INDEX),
+    (PoseLandmark.LEFT_HIP, PoseLandmark.LEFT_KNEE),
+    (PoseLandmark.LEFT_KNEE, PoseLandmark.LEFT_ANKLE),
+    (PoseLandmark.LEFT_ANKLE, PoseLandmark.LEFT_HEEL),
+    (PoseLandmark.LEFT_ANKLE, PoseLandmark.LEFT_FOOT_INDEX),
+    (PoseLandmark.RIGHT_HIP, PoseLandmark.RIGHT_KNEE),
+    (PoseLandmark.RIGHT_KNEE, PoseLandmark.RIGHT_ANKLE),
+    (PoseLandmark.RIGHT_ANKLE, PoseLandmark.RIGHT_HEEL),
+    (PoseLandmark.RIGHT_ANKLE, PoseLandmark.RIGHT_FOOT_INDEX),
+)
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
 _POINT_COLOR = (0, 255, 255)
+_BONE_COLOR = (200, 220, 80)
+_NORM_BONE_COLOR = (220, 180, 50)
+_BONE_MIN_VIS = 0.5
 _POINT_RADIUS = 3
 _TEXT_ORIGIN_FPS = (8, 20)
 _TEXT_ORIGIN_STATE = (8, 42)
@@ -40,11 +78,33 @@ _ZONE_TEXT_PAD = (4, 16)
 _ZONE_LABEL = "SAIR ({:.0f}s)"
 
 
-def _draw_exit_zone(out: NDArray[np.uint8], zone: ExitZoneState) -> None:
+def _blend_rect(
+    out: NDArray[np.uint8],
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    color: tuple[int, int, int],
+    alpha: float = 0.68,
+) -> None:
+    """Fundo semitransparente para leitura do painel de debug sobre qualquer cenário."""
+    height, width = out.shape[:2]
+    rx0, ry0 = max(0, x0), max(0, y0)
+    rx1, ry1 = min(width, x1), min(height, y1)
+    if rx1 <= rx0 or ry1 <= ry0:
+        return
+    roi = out[ry0:ry1, rx0:rx1].astype(np.float32)
+    bg = np.array(color, dtype=np.float32)
+    out[ry0:ry1, rx0:rx1] = np.clip((1.0 - alpha) * roi + alpha * bg, 0, 255).astype(np.uint8)
+    cv2.rectangle(out, (rx0, ry0), (rx1 - 1, ry1 - 1), (85, 90, 100), 1)
+
+
+def _draw_exit_zone(out: NDArray[np.uint8], zone: ExitZoneState, *, mirror: bool = False) -> None:
     """Bloco da zona de saída; a barra sobe de baixo para cima com o progresso."""
     height, width = out.shape[:2]
     cfg = zone.config
-    x0, x1 = round(cfg.x0 * width), round(cfg.x1 * width)
+    x0_n, x1_n = (1.0 - cfg.x1, 1.0 - cfg.x0) if mirror else (cfg.x0, cfg.x1)
+    x0, x1 = round(x0_n * width), round(x1_n * width)
     y0, y1 = round(cfg.y0 * height), round(cfg.y1 * height)
     color = _ZONE_ACTIVE_COLOR if zone.inside else _ZONE_IDLE_COLOR
     if zone.progress > 0:
@@ -56,39 +116,164 @@ def _draw_exit_zone(out: NDArray[np.uint8], zone: ExitZoneState) -> None:
     cv2.putText(out, label, origin, _FONT, _ZONE_TEXT_SCALE, color, 1)
 
 
+def _draw_pose_skeleton(out: NDArray[np.uint8], pose: PoseFrame) -> None:
+    """Desenha os ossos conectados (quando visíveis) e todos os pontos válidos da pose."""
+    height, width = out.shape[:2]
+    coords = pose.landmarks[:, :2] * np.array([width, height], dtype=np.float64)
+    vis = pose.landmarks[:, 3]
+    in_bounds = [
+        bool(np.isfinite(xy).all() and 0 <= xy[0] < width and 0 <= xy[1] < height) for xy in coords
+    ]
+    for a, b in POSE_CONNECTIONS:
+        idx_a, idx_b = int(a), int(b)
+        if (
+            in_bounds[idx_a]
+            and in_bounds[idx_b]
+            and float(vis[idx_a]) >= _BONE_MIN_VIS
+            and float(vis[idx_b]) >= _BONE_MIN_VIS
+        ):
+            pa = (round(float(coords[idx_a, 0])), round(float(coords[idx_a, 1])))
+            pb = (round(float(coords[idx_b, 0])), round(float(coords[idx_b, 1])))
+            cv2.line(out, pa, pb, _BONE_COLOR, 2, cv2.LINE_AA)
+    for ok, (x, y) in zip(in_bounds, coords, strict=True):
+        if ok:
+            cv2.circle(out, (round(float(x)), round(float(y))), _POINT_RADIUS, _POINT_COLOR, -1)
+
+
+def _draw_normalized_skeleton(out: NDArray[np.uint8], skel: NormalizedSkeleton) -> None:
+    """Miniquadro no canto inferior direito com o esqueleto normalizado M = S*R*T."""
+    height, width = out.shape[:2]
+    if width < 240 or height < 200:
+        return
+    box_w = min(144, width // 3)
+    box_h = min(160, height // 2)
+    bx0, by0 = width - box_w - 8, height - box_h - 8
+    bx1, by1 = bx0 + box_w, by0 + box_h
+    _blend_rect(out, bx0, by0, bx1, by1, (18, 20, 24))
+    cv2.putText(out, "M = S*R*T", (bx0 + 6, by0 + 14), _FONT, 0.38, (220, 230, 240), 1, cv2.LINE_AA)
+    cv2.putText(
+        out,
+        f"s={skel.shoulder_px:.0f}px",
+        (bx0 + 6, by1 - 6),
+        _FONT,
+        0.36,
+        (170, 190, 210),
+        1,
+        cv2.LINE_AA,
+    )
+    inner_h = max(40, box_h - 40)
+    scale = min((box_w - 18) / 2.6, inner_h / 3.8)
+    cx = bx0 + box_w // 2
+    cy = by0 + 20 + round(inner_h * 0.48)
+    cv2.line(out, (bx0 + 6, cy), (bx1 - 6, cy), (55, 60, 70), 1)
+    cv2.line(out, (cx, by0 + 20), (cx, by1 - 18), (55, 60, 70), 1)
+
+    pts: dict[int, tuple[int, int]] = {}
+    for idx in range(len(skel.points)):
+        nx, ny = float(skel.points[idx, 0]), float(skel.points[idx, 1])
+        if not (np.isfinite(nx) and np.isfinite(ny)):
+            continue
+        px = round(cx + nx * scale)
+        py = round(cy + ny * scale)
+        if bx0 + 2 <= px < bx1 - 2 and by0 + 18 <= py < by1 - 16:
+            pts[idx] = (px, py)
+    for a, b in POSE_CONNECTIONS:
+        pa, pb = pts.get(int(a)), pts.get(int(b))
+        if pa is not None and pb is not None:
+            cv2.line(out, pa, pb, _NORM_BONE_COLOR, 1, cv2.LINE_AA)
+    for pt in pts.values():
+        cv2.circle(out, pt, 2, _POINT_COLOR, -1)
+
+
+def _fmt_val(value: float | None) -> str:
+    return "  -- " if value is None else f"{value:+.2f}"
+
+
+def _draw_telemetry_panel(
+    out: NDArray[np.uint8],
+    gestures: tuple[GestureTelemetry, ...],
+    pressed: frozenset[str],
+    look: tuple[int, int],
+) -> None:
+    """Painel inferior esquerdo: bruto vs filtrado, limiares, estado e inputs ativos."""
+    height, width = out.shape[:2]
+    has_io = bool(pressed) or look != (0, 0)
+    if not gestures and not has_io:
+        return
+    if width < 240 or height < 160:
+        return
+    row_h = 20
+    footer_h = 22
+    panel_w = min(370, width - 170) if width >= 420 else width - 16
+    panel_h = len(gestures) * row_h + footer_h + 10
+    x0 = 8
+    y1 = height - 8
+    y0 = max(78, y1 - panel_h)
+    _blend_rect(out, x0, y0, x0 + panel_w, y1, (18, 20, 24))
+
+    bar_x0 = x0 + 275
+    bar_x1 = x0 + panel_w - 8
+    draw_bar = bar_x1 - bar_x0 >= 32
+    y = y0 + 18
+    for g in gestures:
+        if y > y1 - footer_h:
+            break
+        badge, color = _GESTURE_STATE_STYLE[g.state]
+        line = (
+            f"{badge} {g.name[:6]:6s} r:{_fmt_val(g.raw_value)} "
+            f"f:{_fmt_val(g.filtered_value)} ({g.theta_off:.2f}/{g.theta_on:.2f})"
+        )
+        cv2.putText(out, line, (x0 + 6, y), _FONT, 0.37, color, 1, cv2.LINE_AA)
+        if draw_bar:
+            top = max(1.0, max(abs(g.theta_on), abs(g.theta_off)) * 1.4)
+            by0, by1 = y - 8, y - 1
+            cv2.rectangle(out, (bar_x0, by0), (bar_x1, by1), (75, 80, 90), 1)
+            if g.filtered_value is not None and np.isfinite(g.filtered_value):
+                frac = min(max(g.filtered_value / top, 0.0), 1.0)
+                fill_w = round(frac * (bar_x1 - bar_x0))
+                if fill_w > 0:
+                    cv2.rectangle(out, (bar_x0, by0 + 1), (bar_x0 + fill_w, by1 - 1), color, -1)
+            for thresh, tcolor in ((g.theta_off, (0, 220, 220)), (g.theta_on, (0, 80, 255))):
+                tx = bar_x0 + round(min(max(thresh / top, 0.0), 1.0) * (bar_x1 - bar_x0))
+                cv2.line(out, (tx, by0 - 2), (tx, by1 + 2), tcolor, 1)
+        y += row_h
+
+    keys_text = "KEYS: " + (" ".join(sorted(pressed)) if pressed else "--")
+    look_text = f"LOOK: ({look[0]:+d},{look[1]:+d})"
+    io_color = (60, 230, 80) if pressed else (185, 195, 205)
+    cv2.putText(out, f"{keys_text}  {look_text}", (x0 + 6, y1 - 6), _FONT, 0.40, io_color, 1)
+
+
 def handedness_label(handedness: str) -> str:
     """Texto do modo (spec 017 RF6): "Destro"/"Canhoto" e o braço que ataca (ASCII, Hershey)."""
     return _HAND_TEXT[handedness]
 
 
 def render(
-    img: NDArray[np.uint8], result: StepResult, handedness: str | None = None
+    img: NDArray[np.uint8],
+    result: StepResult,
+    handedness: str | None = None,
+    *,
+    mirror: bool = False,
 ) -> NDArray[np.uint8]:
-    """Devolve uma cópia de ``img`` com FPS, estado de segurança e pontos da pose.
-
-    ``handedness`` (``"right"``/``"left"``, da config; ``None`` omite) acrescenta o modo
-    destro/canhoto e o braço que ataca. Vem por parâmetro e não pelo ``StepResult`` porque é
-    configuração fixa da sessão, não resultado do frame; o overlay continua só lendo.
-
-    Os pontos usam A5 inversa: ``p = diag(W, H)·n``, com (W, H) o tamanho de ``img``.
-    Nem ``img`` nem ``result`` são alterados.
-    """
+    """Desenha pose, esqueleto, zona de saída, normalização M=S*R*T e telemetria no frame."""
     out: NDArray[np.uint8] = np.array(img, dtype=np.uint8, copy=True)
-    height, width = out.shape[:2]
 
     if result.pose is not None:
-        scale = np.array([width, height], dtype=np.float64)
-        for x, y in result.pose.landmarks[:, :2] * scale:
-            if np.isfinite([x, y]).all() and 0 <= x < width and 0 <= y < height:
-                cv2.circle(out, (round(float(x)), round(float(y))), _POINT_RADIUS, _POINT_COLOR, -1)
+        _draw_pose_skeleton(out, result.pose)
+    if mirror:
+        out = np.ascontiguousarray(cv2.flip(out, 1))
 
     fps_text = "FPS: --" if result.fps is None else f"FPS: {result.fps:.1f}"
     cv2.putText(out, fps_text, _TEXT_ORIGIN_FPS, _FONT, _TEXT_SCALE, (255, 255, 255), 1)
     if result.exit_zone is not None:
-        _draw_exit_zone(out, result.exit_zone)
+        _draw_exit_zone(out, result.exit_zone, mirror=mirror)
     label, color = _STATE_TEXT[result.safety_state]
     cv2.putText(out, label, _TEXT_ORIGIN_STATE, _FONT, _TEXT_SCALE, color, 2)
     if handedness is not None:
         text = handedness_label(handedness)
         cv2.putText(out, text, _TEXT_ORIGIN_HAND, _FONT, _HAND_TEXT_SCALE, _HAND_COLOR, 1)
+    if result.normalized is not None:
+        _draw_normalized_skeleton(out, result.normalized)
+    _draw_telemetry_panel(out, result.gestures, result.pressed, result.look)
     return out

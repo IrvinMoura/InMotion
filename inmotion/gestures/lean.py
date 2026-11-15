@@ -21,5 +21,5 @@ def lean_gesture(
     a confirmar com o MediaPipe real por ``test_lean_sign_on_hardware`` (``-m hardware``).
     """
     return FeatureGesture(
-        "lean", GestureKind.HOLD, params, lambda ctx: lean_forward(ctx.pose, geometry)
+        "lean", GestureKind.HOLD, params, lambda ctx: lean_forward(ctx.pose, geometry), pure=True
     )

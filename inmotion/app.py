@@ -72,14 +72,21 @@ class OpenCvDisplay:
     imagem processada continua a mesma.
     """
 
-    def __init__(self, window_name: str = WINDOW_NAME, handedness: str | None = None) -> None:
+    def __init__(
+        self,
+        window_name: str = WINDOW_NAME,
+        handedness: str | None = None,
+        *,
+        mirror: bool = True,
+    ) -> None:
         self._name = window_name
         self._handedness = handedness  # "right" | "left": o overlay mostra o modo (spec 017)
+        self._mirror = mirror
         self._created = False
 
     def show(self, image: NDArray[np.uint8], result: StepResult) -> bool:
         """Mostra o frame com overlay; False se a janela foi fechada."""
-        frame = render(image, result, self._handedness)
+        frame = render(image, result, self._handedness, mirror=self._mirror)
         if not self._created:
             cv2.namedWindow(self._name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
             height, width = frame.shape[:2]

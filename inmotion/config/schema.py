@@ -122,9 +122,11 @@ class FilterConfig:
 
 @dataclass(frozen=True)
 class OverlayConfig:
-    """Janela de debug: ``enabled=False`` equivale a ``--no-overlay`` (mais FPS)."""
+    """Janela de debug: ``enabled=False`` equivale a ``--no-overlay`` (mais FPS); ``mirror``
+    espelha o quadro na tela (A4)."""
 
     enabled: bool = True
+    mirror: bool = True
 
 
 @dataclass(frozen=True)

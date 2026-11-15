@@ -43,4 +43,4 @@ def jump_gesture(
     (T0, 01/11/2026). O limiar do pulo não muda.
     """
     feature = jump_height if knee_gate is None else _gated_jump_height(knee_gate)
-    return FeatureGesture("jump", GestureKind.TRIGGER, params, feature)
+    return FeatureGesture("jump", GestureKind.TRIGGER, params, feature, pure=True)

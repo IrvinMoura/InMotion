@@ -43,11 +43,14 @@ class FeatureGesture:
         kind: Literal[GestureKind.HOLD, GestureKind.TRIGGER],
         params: GestureParams,
         feature: Callable[[FrameContext], float | None],
+        *,
+        pure: bool = False,
     ) -> None:
         self.name = name
         self.kind: GestureKind = kind
         self._gesture = Gesture(name, kind, params)
         self._feature = feature
+        self._pure = pure
         self._value: float | None = None
 
     def update(self, ctx: FrameContext) -> GestureEvent | None:
@@ -71,6 +74,15 @@ class FeatureGesture:
     def feature_value(self) -> float | None:
         """Última feature calculada (para o overlay e o histórico)."""
         return self._value
+
+    @property
+    def is_pure(self) -> bool:
+        """Indica se ``measure`` pode reavaliar ``feature`` em pose bruta sem efeitos colaterais."""
+        return self._pure
+
+    def measure(self, ctx: FrameContext) -> float | None:
+        """Calcula a feature em ``ctx`` sem alterar o estado da máquina (telemetria)."""
+        return self._feature(ctx) if self._pure else None
 
 
 def all_idle(gestures: Sequence[BodyGesture]) -> bool:

@@ -428,7 +428,9 @@ def test_display_window_is_resizable(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake = _FakeCv2()
     monkeypatch.setattr(app_module, "cv2", fake)
-    monkeypatch.setattr(app_module, "render", lambda image, result, handedness: image)
+    monkeypatch.setattr(
+        app_module, "render", lambda image, result, handedness, *, mirror=False: image
+    )
     display = app_module.OpenCvDisplay("teste")
     image = np.zeros((480, 640, 3), dtype=np.uint8)
     result = StepResult(t=0.0, fps=None, safety_state=SafetyState.ACTIVE, pose=None)

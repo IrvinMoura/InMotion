@@ -9,16 +9,27 @@ from inmotion.config.schema import GameProfile
 from inmotion.exit_zone import ExitZoneState
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
-from inmotion.gestures.base import GestureEvent, GestureState
-from inmotion.gestures.body import BodyGesture, all_idle
+from inmotion.gestures.base import GestureEvent, GestureKind, GestureState
+from inmotion.gestures.body import BodyGesture, FeatureGesture, all_idle
 from inmotion.gestures.factory import build_arbiter
-from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context, knee_lift
+from inmotion.gestures.features import (
+    BaselineParams,
+    BodyBaseline,
+    FrameContext,
+    build_context,
+    knee_lift,
+)
 from inmotion.gestures.head_look import HeadLook, HeadLookParams, head_pose
 from inmotion.gestures.march import MarchParams, MarchTracker
 from inmotion.mapping import ActionMapper, MapperParams
 from inmotion.safety import SafetyManager, SafetyState
 from inmotion.types import PoseFrame
-from inmotion.vision.geometry import GeometryConfig, is_visible
+from inmotion.vision.geometry import (
+    GeometryConfig,
+    NormalizedSkeleton,
+    is_visible,
+    normalize_skeleton,
+)
 from inmotion.vision.landmarks import PoseLandmark, Side
 
 # Ombros e quadris: sem eles visíveis a pose é fantasma/parcial e não conta como tracking.
@@ -36,6 +47,19 @@ _CROUCH = "crouch"
 
 
 @dataclass(frozen=True)
+class GestureTelemetry:
+    """Telemetria de um gesto neste frame (somente leitura para o overlay, spec 009)."""
+
+    name: str
+    kind: GestureKind
+    state: GestureState
+    raw_value: float | None
+    filtered_value: float | None
+    theta_on: float
+    theta_off: float
+
+
+@dataclass(frozen=True)
 class StepResult:
     """O que o frame produziu; o overlay só lê, nunca decide."""
 
@@ -47,6 +71,8 @@ class StepResult:
     look: tuple[int, int] = (0, 0)  # spec 014: (dx, dy) da câmera enviado neste frame
     events: tuple[GestureEvent, ...] = ()
     pressed: frozenset[str] = frozenset()
+    normalized: NormalizedSkeleton | None = None
+    gestures: tuple[GestureTelemetry, ...] = ()
 
 
 class Pipeline:
@@ -149,6 +175,7 @@ class Pipeline:
         self._was_active = active
         if not active:
             self._mapper.reset()
+        unfiltered = pose
         if self._pose_filter is not None:
             if pose is not None and active:
                 pose = self._pose_filter(pose)
@@ -156,22 +183,31 @@ class Pipeline:
                 self._pose_filter.reset()  # sem pose ou fora de ACTIVE: recomeça limpo
         look = (0, 0)
         events: tuple[GestureEvent, ...] = ()
-        if active:
-            if pose is not None:
-                events, look = self._run_gestures(pose, t)
-            else:
+        display_pose = raw if pose is None else pose
+        if active and pose is not None:
+            events, look, normalized, gestures = self._run_gestures(pose, t, unfiltered)
+        else:
+            if active:
                 self._mapper.update(t)
                 if self._head_look is not None:
                     self._head_look.update(None, t)  # RF6: zera o resto, sem Δt na volta
+            normalized = (
+                normalize_skeleton(display_pose, self._geometry)
+                if display_pose is not None
+                else None
+            )
+            gestures = self._collect_telemetry(None, has_values=False)
         fps = self._fps.update(t)
         return StepResult(
             t=t,
             fps=fps,
             safety_state=state,
-            pose=raw if pose is None else pose,
+            pose=display_pose,
             look=look,
             events=events,
             pressed=self._safety.input.pressed,
+            normalized=normalized,
+            gestures=gestures,
         )
 
     def _crouch_in_progress(self) -> bool:
@@ -205,11 +241,46 @@ class Pipeline:
         if self._head_look is not None:
             self._head_look.reset()  # RF2: o neutro é medido de novo a cada volta a ACTIVE
 
+    def _collect_telemetry(
+        self, raw_ctx: FrameContext | None, *, has_values: bool
+    ) -> tuple[GestureTelemetry, ...]:
+        """Lê snapshots, valores brutos e filtrados para o overlay (sem alterar estado)."""
+        items: list[GestureTelemetry] = []
+        for gesture in self._gestures:
+            snap = gesture.snapshot()
+            if not has_values:
+                raw_val = None
+                filtered_val = None
+            else:
+                filtered_val = gesture.feature_value
+                if raw_ctx is not None and isinstance(gesture, FeatureGesture) and gesture.is_pure:
+                    raw_val = gesture.measure(raw_ctx)
+                else:
+                    raw_val = filtered_val
+            items.append(
+                GestureTelemetry(
+                    name=snap.name,
+                    kind=snap.kind,
+                    state=snap.state,
+                    raw_value=raw_val,
+                    filtered_value=filtered_val,
+                    theta_on=snap.theta_on,
+                    theta_off=snap.theta_off,
+                )
+            )
+        return tuple(items)
+
     def _run_gestures(
-        self, pose: PoseFrame, t: float
-    ) -> tuple[tuple[GestureEvent, ...], tuple[int, int]]:
+        self, pose: PoseFrame, t: float, raw_pose: PoseFrame | None = None
+    ) -> tuple[
+        tuple[GestureEvent, ...],
+        tuple[int, int],
+        NormalizedSkeleton | None,
+        tuple[GestureTelemetry, ...],
+    ]:
         """Repouso (estado do frame anterior) → contexto → marcha → gestos → árbitro → mapper
-        → câmera. Devolve os eventos resolvidos e o ``(dx, dy)`` da câmera enviado no frame."""
+        → câmera. Devolve os eventos resolvidos, o ``(dx, dy)``, o esqueleto normalizado e a
+        telemetria dos gestos."""
         resting = all_idle(self._gestures)
         ctx = build_context(
             pose,
@@ -227,7 +298,20 @@ class Pipeline:
             events.extend(self._combo.derive(events, t))
         resolved = tuple(self._arbiter.resolve(events, t))
         self._mapper.handle(resolved, t)
-        return resolved, self._look(pose, t, marching=march.steps > 0)
+        look = self._look(pose, t, marching=march.steps > 0)
+        raw_ctx: FrameContext | None = None
+        if self._pose_filter is not None and raw_pose is not None:
+            raw_ctx = build_context(
+                raw_pose,
+                t,
+                self._geometry,
+                self._baseline,
+                resting=False,
+                shoulder_baseline=self._shoulder_baseline,
+                knee_baselines=self._knee_baselines,
+            )
+            raw_ctx = replace(raw_ctx, march=march)
+        return resolved, look, ctx.skeleton, self._collect_telemetry(raw_ctx, has_values=True)
 
     def _look(self, pose: PoseFrame, t: float, *, marching: bool) -> tuple[int, int]:
         """Spec 014: ``head_pose`` → ``HeadLook`` → ``move_rel``, só em ACTIVE com pose.
