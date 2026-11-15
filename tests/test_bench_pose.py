@@ -64,3 +64,15 @@ def test_bench_variant_rejects_non_positive_duration() -> None:
     clock = FakeClock(t0=0.0)
     with pytest.raises(ValueError, match="duration_s"):
         bench_variant("lite", EndlessSource(clock), TimedEstimator(clock), clock, 0.0)
+
+
+def test_benchmark_without_frames_times_out_during_warmup() -> None:
+    clock = FakeClock()
+
+    class NoFrames(EndlessSource):
+        def read(self, timeout_s: float) -> FramePacket | None:
+            clock.advance(1.0)
+            return None
+
+    with pytest.raises(OSError, match="nenhum frame"):
+        bench_variant("lite", NoFrames(clock), TimedEstimator(clock), clock, 1.0)

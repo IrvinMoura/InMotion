@@ -27,7 +27,7 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
-# --- Claude Code (config pessoal; o CLAUDE.md é versionado) ---
+# --- Configuração pessoal de ferramentas ---
 .claude/settings.local.json
 
 # --- Dados gerados em runtime ---

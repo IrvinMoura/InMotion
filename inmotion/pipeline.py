@@ -9,7 +9,7 @@ from inmotion.config.schema import GameProfile
 from inmotion.exit_zone import ExitZoneState
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
-from inmotion.gestures.base import GestureState
+from inmotion.gestures.base import GestureEvent, GestureState
 from inmotion.gestures.body import BodyGesture, all_idle
 from inmotion.gestures.factory import build_arbiter
 from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context, knee_lift
@@ -45,6 +45,8 @@ class StepResult:
     pose: PoseFrame | None
     exit_zone: ExitZoneState | None = None
     look: tuple[int, int] = (0, 0)  # spec 014: (dx, dy) da câmera enviado neste frame
+    events: tuple[GestureEvent, ...] = ()
+    pressed: frozenset[str] = frozenset()
 
 
 class Pipeline:
@@ -92,6 +94,9 @@ class Pipeline:
         self._mapper = ActionMapper(profile, safety.input, mapper_params or MapperParams())
         self._was_active = True  # gestos nascem zerados
         self._tracked_since: float | None = None  # início da sequência contínua de pose
+        self._generation = safety.generation
+        self._stall_generation = safety.stall_generation
+        self._needs_reset = False
 
     def step(self, pose: PoseFrame | None, t: float) -> StepResult:
         """on_frame → (se ACTIVE) gestos → árbitro → mapper → FPS.
@@ -116,6 +121,14 @@ class Pipeline:
         ACTIVE sem pose válida ele ainda solta os taps vencidos por tempo.
         """
         raw = pose
+        generation = self._safety.generation
+        if generation != self._generation:
+            self._needs_reset = True
+            self._generation = generation
+        stall_generation = self._safety.stall_generation
+        if stall_generation != self._stall_generation:
+            self._tracked_since = None
+            self._stall_generation = stall_generation
         config = self._safety.config
         required = SHOULDERS if self._crouch_in_progress() else TORSO
         if pose is not None and not is_visible(pose, required, config.min_torso_visibility):
@@ -130,8 +143,9 @@ class Pipeline:
         self._safety.on_frame(t, pose is not None)
         state = self._safety.state
         active = state is SafetyState.ACTIVE
-        if active and not self._was_active:
+        if active and (not self._was_active or self._needs_reset):
             self._reset_all()
+            self._needs_reset = False
         self._was_active = active
         if not active:
             self._mapper.reset()
@@ -141,16 +155,23 @@ class Pipeline:
             else:
                 self._pose_filter.reset()  # sem pose ou fora de ACTIVE: recomeça limpo
         look = (0, 0)
+        events: tuple[GestureEvent, ...] = ()
         if active:
             if pose is not None:
-                look = self._run_gestures(pose, t)
+                events, look = self._run_gestures(pose, t)
             else:
                 self._mapper.update(t)
                 if self._head_look is not None:
                     self._head_look.update(None, t)  # RF6: zera o resto, sem Δt na volta
         fps = self._fps.update(t)
         return StepResult(
-            t=t, fps=fps, safety_state=state, pose=raw if pose is None else pose, look=look
+            t=t,
+            fps=fps,
+            safety_state=state,
+            pose=raw if pose is None else pose,
+            look=look,
+            events=events,
+            pressed=self._safety.input.pressed,
         )
 
     def _crouch_in_progress(self) -> bool:
@@ -159,11 +180,17 @@ class Pipeline:
         Em LOST/PAUSED o gesto pode estar parado num estado velho (nada o atualiza até o
         reset da volta a ACTIVE), por isso o estado da segurança também conta.
         """
-        if self._crouch is None or self._safety.state is not SafetyState.ACTIVE:
+        if (
+            self._needs_reset
+            or self._crouch is None
+            or self._safety.state is not SafetyState.ACTIVE
+        ):
             return False
         return self._crouch.snapshot().state in (GestureState.ARMING, GestureState.ACTIVE)
 
     def _reset_all(self) -> None:
+        if self._pose_filter is not None:
+            self._pose_filter.reset()
         for gesture in self._gestures:
             gesture.reset()
         self._arbiter.reset()
@@ -178,9 +205,11 @@ class Pipeline:
         if self._head_look is not None:
             self._head_look.reset()  # RF2: o neutro é medido de novo a cada volta a ACTIVE
 
-    def _run_gestures(self, pose: PoseFrame, t: float) -> tuple[int, int]:
+    def _run_gestures(
+        self, pose: PoseFrame, t: float
+    ) -> tuple[tuple[GestureEvent, ...], tuple[int, int]]:
         """Repouso (estado do frame anterior) → contexto → marcha → gestos → árbitro → mapper
-        → câmera. Devolve o ``(dx, dy)`` da câmera enviado no frame."""
+        → câmera. Devolve os eventos resolvidos e o ``(dx, dy)`` da câmera enviado no frame."""
         resting = all_idle(self._gestures)
         ctx = build_context(
             pose,
@@ -196,8 +225,9 @@ class Pipeline:
         events = [e for g in self._gestures if (e := g.update(ctx)) is not None]
         if self._combo is not None:
             events.extend(self._combo.derive(events, t))
-        self._mapper.handle(self._arbiter.resolve(events, t), t)
-        return self._look(pose, t, marching=march.steps > 0)
+        resolved = tuple(self._arbiter.resolve(events, t))
+        self._mapper.handle(resolved, t)
+        return resolved, self._look(pose, t, marching=march.steps > 0)
 
     def _look(self, pose: PoseFrame, t: float, *, marching: bool) -> tuple[int, int]:
         """Spec 014: ``head_pose`` → ``HeadLook`` → ``move_rel``, só em ACTIVE com pose.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 
 from inmotion.app import DEFAULT_PROFILE
+from inmotion.config.schema import AppConfig, FilterConfig
 from inmotion.fps import FpsMeter
 from inmotion.input.backend import MOUSE_BUTTONS, InputBackend
 from inmotion.pipeline import Pipeline, StepResult
@@ -24,7 +26,14 @@ from tools.replay import build_pipeline, main
 SIZE = (640, 480)
 DT = 1 / 30
 # A fixture tem ~1,2 s, mais que a persistência padrão (min_track_s = 1 s) só no fim: desligada.
-build = partial(build_pipeline, config=SafetyConfig(min_track_s=0.0))
+build = partial(
+    build_pipeline,
+    app_config=replace(
+        AppConfig(),
+        safety=SafetyConfig(min_track_s=0.0),
+        filters=FilterConfig(kind="none"),
+    ),
+)
 
 
 def body(y: float) -> PoseFrame:
@@ -93,7 +102,8 @@ def test_replay_is_deterministic() -> None:
     assert first.inputs == second.inputs
     assert first == second
     assert any(kind == "press" for _, kind, _ in first.inputs)
-    assert first.events == ()
+    assert first.events
+    assert first.events == second.events
 
 
 def test_replay_matches_live_pipeline() -> None:
