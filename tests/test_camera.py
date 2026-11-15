@@ -156,6 +156,26 @@ def test_start_fails_if_capture_not_opened() -> None:
     cam.close()
 
 
+def test_camera_fallback_to_alternate_index() -> None:
+    calls: list[tuple[int, int]] = []
+    fake1 = FakeCapture()
+    fake1.opened = False
+    fake0 = FakeCapture()
+    fake0.opened = True
+
+    def factory(index: int, api: int) -> FakeCapture:
+        calls.append((index, api))
+        return fake0 if index == 0 else fake1
+
+    cam = Camera(CameraConfig(index=1), FakeClock(), capture_factory=factory)
+    cam.start()
+    try:
+        assert calls == [(1, cv2.CAP_DSHOW), (0, cv2.CAP_DSHOW)]
+        assert cam.resolved_index == 0
+    finally:
+        cam.close()
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
