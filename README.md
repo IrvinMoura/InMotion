@@ -87,6 +87,9 @@ pip install -r requirements.txt
 
 # Baixe o modelo de pose (lite | full | heavy)
 python tools/download_model.py --variant full
+
+# Verifique se o ambiente e a câmera estão prontos (opcional: --skip-camera)
+python -m tools.check_env
 ```
 
 O arquivo `.task` é salvo em `models/` e não é versionado.
@@ -103,7 +106,9 @@ python -m inmotion --game minecraft
 
 Há também uma zona de saída provisória: manter a mão no retângulo do canto superior esquerdo da imagem por 4 s encerra o app.
 
-> O índice de câmera padrão é `1` (provisório, no `config/default.yaml`). Se a câmera não abrir, use `--camera 0`.
+> O índice de câmera padrão é `1` (`config/default.yaml`), com fallback automático entre os índices `1` e `0`. Se precisar escolher outro dispositivo, use `--camera N`.
+
+O overlay de debug exibe o vídeo espelhado horizontalmente (`overlay.mirror: true`), esqueleto conectado, miniquadro do esqueleto normalizado ($M = S \cdot R \cdot T$), sinais brutos vs. filtrados com limiares (`theta_off`/`theta_on`), estado de cada gesto e inputs ativos.
 
 ### Opções da Linha de Comando
 
@@ -156,6 +161,7 @@ Para outro jogo, copie `config/games/minecraft.yaml`, ajuste `bindings` e `arbit
 | Ferramenta       | Para quê                                                                 | Exemplo                                                                   |
 |------------------|--------------------------------------------------------------------------|---------------------------------------------------------------------------|
 | `download_model` | Baixa o modelo do MediaPipe                                              | `python tools/download_model.py --variant full`                           |
+| `check_env`      | Valida Python 3.10, dependências, modelo `.task`, input e câmera         | `python -m tools.check_env`                                               |
 | `bench_pose`     | Mede FPS e latência por variante                                         | `python -m tools.bench_pose --seconds 10`                                 |
 | `guided`         | Sessão guiada em tela grande (**não envia input**); grava `.npz` e `.json` | `python -m tools.guided --person p1 --distance 2.0 --script full`       |
 | `record`         | Grava landmarks rotulados por teclas (`1` soco D, `2` soco E, `3` pulo, `4` agachar, `5` inclinar) | `python -m tools.record --person p1 --lighting clara --out data/p1.npz` |
@@ -182,7 +188,7 @@ InMotion/
 │   ├── safety.py           → Segurança de input
 │   ├── mapping.py          → Gesto → entrada
 │   └── recording.py / recorder.py / replay.py → Gravação e replay
-├── tools/                  → download_model, bench_pose, guided, record, replay
+├── tools/                  → check_env, download_model, bench_pose, guided, record, replay, simulate
 ├── tests/                  → Testes e fixtures de sessões .npz
 ├── pyproject.toml          → Ruff, pytest e mypy
 ├── requirements.txt        → Dependências de runtime (versões fixas)
