@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from inmotion.gestures.base import Direction, GestureKind, GestureParams
 from inmotion.gestures.body import FeatureGesture
-from inmotion.gestures.features import lean_back, lean_forward, lean_side
+from inmotion.gestures.features import lean_back_rel, lean_forward, lean_side
 from inmotion.vision.geometry import GeometryConfig
 from inmotion.vision.landmarks import Side
 
 DEFAULT_LEAN_PARAMS = GestureParams(0.30, 0.20, Direction.ABOVE, debounce_frames=4)  # rad
-DEFAULT_WALK_BACK_PARAMS = DEFAULT_LEAN_PARAMS
+DEFAULT_WALK_BACK_PARAMS = GestureParams(0.14, 0.08, Direction.ABOVE, debounce_frames=3)
 DEFAULT_STRAFE_PARAMS = DEFAULT_LEAN_PARAMS
 _DEFAULT_GEOMETRY = GeometryConfig()
 
@@ -36,7 +36,7 @@ def walk_back_gesture(
         "walk_back",
         GestureKind.HOLD,
         params,
-        lambda ctx: lean_back(ctx.pose, geometry),
+        lambda ctx: lean_back_rel(ctx, geometry),
         pure=True,
     )
 

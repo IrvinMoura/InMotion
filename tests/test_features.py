@@ -20,6 +20,7 @@ from inmotion.gestures.features import (
     jump_height,
     knee_lift,
     lean_back,
+    lean_back_rel,
     lean_forward,
     lean_left,
     lean_right,
@@ -216,6 +217,20 @@ def test_lateral_lean_scale_and_translation_invariant(
     right = lean_right(pose, GEOMETRY)
     assert left == pytest.approx(lat, abs=1e-6)
     assert right == pytest.approx(-lat, abs=1e-6)
+
+
+def test_lean_back_rel_compensates_resting_bias() -> None:
+    """Spec 019: com repouso em +0,30 rad, recuar para +0,12 rad dá ``lean_back_rel ≈ +0,18``."""
+    hip = BodyBaseline(BaselineParams(init_frames=2))
+    lean_base = BodyBaseline(BaselineParams(init_frames=2))
+    for i in range(2):
+        pose = make_body(t=i / 30.0, lean=0.30)
+        build_context(pose, pose.t, GEOMETRY, hip, resting=True, lean_baseline=lean_base)
+    back_pose = make_body(t=2 / 30.0, lean=0.12)
+    ctx = build_context(
+        back_pose, back_pose.t, GEOMETRY, hip, resting=False, lean_baseline=lean_base
+    )
+    assert lean_back_rel(ctx, GEOMETRY) == pytest.approx(0.18, abs=1e-6)
 
 
 # --- Spec 017: crouch_drop (agachar pelos ombros) ---------------------------------------------

@@ -113,6 +113,7 @@ class Pipeline:
             BodyBaseline(baseline_params or BaselineParams()),
             BodyBaseline(baseline_params or BaselineParams()),
         )
+        self._lean_baseline = BodyBaseline(baseline_params or BaselineParams())  # spec 019
         self._march = MarchTracker(march_params or MarchParams())  # spec 018
         self._head_look_params = head_look  # spec 014: None = sem câmera pela cabeça
         self._head_look = HeadLook(head_look) if head_look is not None else None
@@ -250,6 +251,7 @@ class Pipeline:
         self._shoulder_baseline.reset()
         for knee_baseline in self._knee_baselines:
             knee_baseline.reset()
+        self._lean_baseline.reset()
         self._march.reset()
         if self._head_look is not None:
             self._head_look.reset()  # RF2: o neutro é medido de novo a cada volta a ACTIVE
@@ -303,6 +305,7 @@ class Pipeline:
             resting,
             self._shoulder_baseline,
             self._knee_baselines,
+            self._lean_baseline,
         )
         march = self._march.update(knee_lift(ctx, Side.LEFT), knee_lift(ctx, Side.RIGHT), t)
         ctx = replace(ctx, march=march)  # estado da marcha: uma vez por frame, antes dos gestos
@@ -325,6 +328,7 @@ class Pipeline:
                 resting=False,
                 shoulder_baseline=self._shoulder_baseline,
                 knee_baselines=self._knee_baselines,
+                lean_baseline=self._lean_baseline,
             )
             raw_ctx = replace(raw_ctx, march=march)
         return resolved, look, ctx.skeleton, self._collect_telemetry(raw_ctx, has_values=True)

@@ -132,6 +132,8 @@ class FrameContext:
     knee_dist_right_px: float | None = None
     knee_base_left_px: float | None = None
     knee_base_right_px: float | None = None
+    # Spec 019: ângulo de inclinação frontal em repouso (rad, compensa viés do MediaPipe).
+    lean_baseline_rad: float | None = None
     # Estado da marcha do frame (preenchido pelo pipeline, uma vez por frame, antes dos gestos).
     march: MarchState | None = None
 
@@ -176,6 +178,7 @@ def build_context(
     resting: bool,
     shoulder_baseline: BodyBaseline | None = None,
     knee_baselines: tuple[BodyBaseline, BodyBaseline] | None = None,
+    lean_baseline: BodyBaseline | None = None,
 ) -> FrameContext:
     """Monta o contexto do frame: esqueleto normalizado (A6), ``s``, ``h`` e as bases R7.
 
@@ -203,6 +206,12 @@ def build_context(
             else shoulder_baseline.value
         )
     skeleton = normalize_skeleton(pose, geometry)
+    lean_base: float | None = None
+    if lean_baseline is not None:
+        lf = lean_forward(pose, geometry)
+        lean_base = (
+            lean_baseline.update(lf, resting, scale=1.0) if lf is not None else lean_baseline.value
+        )
     knee_base: tuple[float | None, float | None] = (None, None)
     if knee_baselines is not None:
         knee_base = (knee_baselines[0].value, knee_baselines[1].value)
@@ -219,6 +228,7 @@ def build_context(
             shoulder_base,
             knee_base_left_px=knee_base[0],
             knee_base_right_px=knee_base[1],
+            lean_baseline_rad=lean_base,
         )
     px = pose.pixels()
     hip_y = float((px[_HIPS[0], 1] + px[_HIPS[1], 1]) / 2.0)
@@ -250,6 +260,7 @@ def build_context(
         dist_right,
         knee_base[0],
         knee_base[1],
+        lean_baseline_rad=lean_base,
     )
 
 
@@ -342,6 +353,25 @@ def lean_back(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
     """Spec 019 (A9): inclinação do tronco para trás em rad (``-lean_forward``)."""
     val = lean_forward(pose, geometry)
     return None if val is None else -val
+
+
+def lean_back_rel(ctx: FrameContext, geometry: GeometryConfig) -> float | None:
+    """Spec 019: inclinação para trás relativa à base R7 ``b_lean − lean_forward`` (rad).
+
+    Compensa o viés de repouso do MediaPipe (+0,26 a +0,33 rad em pé). Sem ``b_lean``
+    (antes de K amostras), usa ``-lean_forward``. Durante pulo ou agachamento
+    (``|j| >= 0,15`` ou ``|c| >= 0,50``), vale ``0.0`` para não disparar ré ao agachar/pular.
+    """
+    lf = lean_forward(ctx.pose, geometry)
+    if lf is None:
+        return None
+    if ctx.lean_baseline_rad is None:
+        return -lf
+    jh = jump_height(ctx)
+    cd = crouch_drop(ctx)
+    if (jh is not None and abs(jh) >= 0.15) or (cd is not None and abs(cd) >= 0.50):
+        return 0.0
+    return ctx.lean_baseline_rad - lf
 
 
 def lean_side(pose: PoseFrame, side: Side, geometry: GeometryConfig) -> float | None:

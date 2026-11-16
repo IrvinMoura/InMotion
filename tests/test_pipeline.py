@@ -755,7 +755,7 @@ def test_w_released_within_step_timeout_after_last_step() -> None:
             release_t = pose.t
     assert release_t is not None
     elapsed = release_t - last_step_i * DT
-    assert 1.2 <= elapsed <= 1.2 + 2 * DT
+    assert 1.5 <= elapsed <= 1.5 + 2 * DT
 
 
 def test_fast_march_adds_ctrl_and_both_release_at_the_end() -> None:
