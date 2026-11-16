@@ -9,7 +9,7 @@ from inmotion.vision.geometry import GeometryConfig
 from inmotion.vision.landmarks import Side
 
 DEFAULT_LEAN_PARAMS = GestureParams(0.30, 0.20, Direction.ABOVE, debounce_frames=4)  # rad
-DEFAULT_WALK_BACK_PARAMS = GestureParams(0.14, 0.08, Direction.ABOVE, debounce_frames=3)
+DEFAULT_WALK_BACK_PARAMS = GestureParams(0.22, 0.12, Direction.ABOVE, debounce_frames=4)
 DEFAULT_STRAFE_PARAMS = DEFAULT_LEAN_PARAMS
 _DEFAULT_GEOMETRY = GeometryConfig()
 

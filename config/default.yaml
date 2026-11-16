@@ -54,7 +54,7 @@ gestures:
   # Com crouch.feature: hip os valores antigos eram theta_on 0.35 e theta_off 0.25.
   crouch:       {theta_on: 0.9,  theta_off: 0.6,  direction: above, debounce_frames: 4, cooldown_s: 0.0}
   lean:         {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
-  walk_back:    {theta_on: 0.14, theta_off: 0.08, direction: above, debounce_frames: 3, cooldown_s: 0.0}
+  walk_back:    {theta_on: 0.22, theta_off: 0.12, direction: above, debounce_frames: 4, cooldown_s: 0.0}
   strafe_left:  {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
   strafe_right: {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
   # walk e sprint (spec 018): sinais do MarchTracker; o início e o fim do andar vêm de

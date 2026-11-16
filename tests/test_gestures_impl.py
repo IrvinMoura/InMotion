@@ -458,7 +458,7 @@ def test_walk_back_and_strafe_gestures() -> None:
 
 
 def test_walk_back_uses_resting_lean_baseline() -> None:
-    """Spec 019: após calibração em repouso (+0,28 rad), recuar 0,18 rad dispara `walk_back`."""
+    """Spec 019: após calibração em repouso (+0,28 rad), inclinar 0,30 rad dispara `walk_back`."""
     from inmotion.gestures.lean import walk_back_gesture
 
     rig = Rig([walk_back_gesture()])
@@ -466,7 +466,7 @@ def test_walk_back_uses_resting_lean_baseline() -> None:
         rig.step(make_body(t=i * DT, lean=0.28))
     assert rig.events == []
     for i in range(16, 22):
-        rig.step(make_body(t=i * DT, lean=0.10))
+        rig.step(make_body(t=i * DT, lean=-0.02))
     assert rig.kinds("walk_back") == [EventKind.START]
     for i in range(22, 26):
         rig.step(make_body(t=i * DT, lean=0.28))

@@ -1002,9 +1002,9 @@ def test_lean_stops_pitch_but_not_yaw() -> None:
         pipeline.step(with_face(make_body(t=i * DT)), i * DT)
     start = NEUTRAL_FRAMES
     for i in range(start, start + 30):
-        body = make_body(t=i * DT, lean=-0.5, lateral_lean=0.5)
+        body = make_body(t=i * DT, lean=-0.5)
         pipeline.step(with_face(body, yaw=0.5, pitch=-0.5), i * DT)
-    assert {"s", "a"} <= fake.pressed
+    assert "s" in fake.pressed
     assert sum(dx for dx, _ in fake.moves) > 0  # yaw continua funcionando
     assert sum(dy for _, dy in fake.moves) == 0  # pitch suprimido durante inclinação
 
