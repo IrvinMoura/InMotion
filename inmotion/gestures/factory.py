@@ -16,7 +16,14 @@ from inmotion.gestures.body import FeatureGesture
 from inmotion.gestures.combo import ComboGesture
 from inmotion.gestures.crouch import DEFAULT_CROUCH_PARAMS, CrouchFeature, crouch_gesture
 from inmotion.gestures.jump import DEFAULT_JUMP_PARAMS, jump_gesture
-from inmotion.gestures.lean import DEFAULT_LEAN_PARAMS, lean_gesture
+from inmotion.gestures.lean import (
+    DEFAULT_LEAN_PARAMS,
+    DEFAULT_STRAFE_PARAMS,
+    DEFAULT_WALK_BACK_PARAMS,
+    lean_gesture,
+    strafe_gesture,
+    walk_back_gesture,
+)
 from inmotion.gestures.march import (
     DEFAULT_SPRINT_PARAMS,
     DEFAULT_WALK_PARAMS,
@@ -29,7 +36,18 @@ from inmotion.vision.geometry import GeometryConfig
 from inmotion.vision.landmarks import Side
 
 BODY_GESTURE_NAMES: frozenset[str] = frozenset(
-    {"attack", "use", "jump", "crouch", "walk", "sprint", "lean"}
+    {
+        "attack",
+        "use",
+        "jump",
+        "crouch",
+        "walk",
+        "sprint",
+        "lean",
+        "walk_back",
+        "strafe_left",
+        "strafe_right",
+    }
 )
 
 DEFAULT_GESTURE_PARAMS: Mapping[str, GestureParams] = {
@@ -40,6 +58,9 @@ DEFAULT_GESTURE_PARAMS: Mapping[str, GestureParams] = {
     "walk": DEFAULT_WALK_PARAMS,
     "sprint": DEFAULT_SPRINT_PARAMS,
     "lean": DEFAULT_LEAN_PARAMS,
+    "walk_back": DEFAULT_WALK_BACK_PARAMS,
+    "strafe_left": DEFAULT_STRAFE_PARAMS,
+    "strafe_right": DEFAULT_STRAFE_PARAMS,
 }
 
 
@@ -77,6 +98,14 @@ def build_body_gestures(
         gestures.append(sprint_gesture(merged["sprint"]))
     if "lean" in wanted:
         gestures.append(lean_gesture(merged["lean"], geometry))
+    if "walk_back" in wanted:
+        gestures.append(walk_back_gesture(merged["walk_back"], geometry))
+    if "strafe_left" in wanted:
+        gestures.append(strafe_gesture("strafe_left", Side.LEFT, merged["strafe_left"], geometry))
+    if "strafe_right" in wanted:
+        gestures.append(
+            strafe_gesture("strafe_right", Side.RIGHT, merged["strafe_right"], geometry)
+        )
     return gestures
 
 

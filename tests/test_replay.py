@@ -398,13 +398,10 @@ def test_head_look_drift_during_gestures(name: str) -> None:
 # mesmas sessões da T0 com olhar para cima, centro, olhar para baixo, centro.
 PITCH_FIXTURES = ("look_pitch_2m.npz", "look_pitch_1m5.npz")
 # Limitações conhecidas do pitch (replay de 12/11/2026), fora da checagem de deriva:
-# - `lean`: inclinar o tronco para frente baixa o nariz em relação aos ombros (+163 a +207
-#   graus nas fixtures do agachar); o Minecraft não usa o gesto hoje, revisitar na spec 019;
 # - `jump` de `march_2m` (−50 graus) e `rest_mid2` de `march_2m_dropped` (+38 graus): a cabeça
 #   sobe/desce logo depois da marcha; nas 18 sessões com pulo a mediana é 0.
+# Na spec 019, `lean` foi resolvido pela supressão de pitch na inclinação do tronco.
 PITCH_KNOWN = {
-    ("crouch_2m.npz", "lean"),
-    ("crouch_1m5.npz", "lean"),
     ("march_2m.npz", "jump"),
     ("march_2m_dropped.npz", "rest_mid2"),
 }

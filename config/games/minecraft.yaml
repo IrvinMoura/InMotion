@@ -24,24 +24,32 @@
 # `sprint` só existe com `walk` ativo, então `w` segue apertado e `ctrl` soma (spec 018).
 name: minecraft
 bindings:
-  attack: {input: mouse_left,  kind: hold}
-  use:    {input: mouse_right, kind: hold}
-  jump:   {input: space,       kind: trigger}
-  crouch: {input: shift,       kind: hold}
-  walk:   {input: w,           kind: hold}
-  sprint: {input: ctrl,        kind: hold}
+  attack:       {input: mouse_left,  kind: hold}
+  use:          {input: mouse_right, kind: hold}
+  jump:         {input: space,       kind: trigger}
+  crouch:       {input: shift,       kind: hold}
+  walk:         {input: w,           kind: hold}
+  sprint:       {input: ctrl,        kind: hold}
+  walk_back:    {input: s,           kind: hold}
+  strafe_left:  {input: a,           kind: hold}
+  strafe_right: {input: d,           kind: hold}
 
-# Prioridades (spec 017 RF2): antes = mais forte. Quem é mais forte suprime o mais fraco só
+# Prioridades (spec 017 RF2 / spec 019): antes = mais forte. Quem é mais forte suprime o mais fraco só
 # dentro de um grupo exclusivo; fora deles os gestos convivem. O combo suprime os membros.
-# Só gestos que existem entram aqui (nome desconhecido é erro); a spec 019 acrescenta
-# walk_back e strafe_* à prioridade e aos grupos quando criar os gestos. `walk` e `sprint`
-# NÃO são exclusivos entre si (correr soma ctrl ao w); o agachar vence os dois. Um grupo
-# libera só um membro, por isso são dois pares [crouch, walk] e [crouch, sprint].
+# `walk` e `sprint` NÃO são exclusivos entre si (correr soma ctrl ao w); o agachar vence os dois,
+# assim como recuar (`walk_back`) e esquivas (`strafe_*`). `walk`/`sprint` são exclusivos com
+# `walk_back`, e `strafe_left` é exclusivo com `strafe_right`.
 arbiter:
-  priority: [both_arms, crouch, jump, attack, use, walk, sprint]
+  priority: [both_arms, crouch, jump, attack, use, walk, sprint, walk_back, strafe_left, strafe_right]
   exclusive:
     - [crouch, jump]
     - [crouch, walk]
     - [crouch, sprint]
+    - [crouch, walk_back]
+    - [crouch, strafe_left]
+    - [crouch, strafe_right]
+    - [walk, walk_back]
+    - [sprint, walk_back]
+    - [strafe_left, strafe_right]
   combos:
     both_arms: [attack, use]

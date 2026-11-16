@@ -177,6 +177,9 @@ def test_minecraft_profile_loads_and_matches_backend_keys() -> None:
         "crouch": ("shift", GestureKind.HOLD),
         "walk": ("w", GestureKind.HOLD),
         "sprint": ("ctrl", GestureKind.HOLD),
+        "walk_back": ("s", GestureKind.HOLD),
+        "strafe_left": ("a", GestureKind.HOLD),
+        "strafe_right": ("d", GestureKind.HOLD),
     }
     keys = KeyboardMouseBackend(api=FakeDirectInput()).supported_keys()
     validate_profile(profile, BODY_GESTURE_NAMES, keys)  # inclui a seção `arbiter`

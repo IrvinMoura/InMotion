@@ -23,6 +23,9 @@ Jogue com o corpo, usando apenas uma webcam: o InMotion reconhece gestos e os co
 | Agachar            | Ombros abaixo da base calibrada         | `Shift`                 | segura |
 | Andar              | Marcha no lugar (2 passos alternados)   | `W`                     | segura |
 | Correr             | Marcha rápida (soma ao andar)           | `Ctrl`                  | segura |
+| Recuar             | Inclinar o tronco para trás             | `S`                     | segura |
+| Andar p/ esquerda  | Inclinar o tronco para a esquerda       | `A`                     | segura |
+| Andar p/ direita   | Inclinar o tronco para a direita        | `D`                     | segura |
 
 - Com **os dois braços esticados juntos**, os cliques são suprimidos (combo `both_arms`)
 - **Agachar** vence pular, andar e correr
@@ -144,7 +147,7 @@ python -m inmotion --set filters.kind=ema --set filters.ema.alpha=0.4 --no-overl
 python -m inmotion --set gestures.jump.theta_on=0.20
 ```
 
-Para outro jogo, copie `config/games/minecraft.yaml`, ajuste `bindings` e `arbiter` e use `--game <nome>`. Gestos disponíveis: `attack`, `use`, `jump`, `crouch`, `walk`, `sprint` e `lean`.
+Para outro jogo, copie `config/games/minecraft.yaml`, ajuste `bindings` e `arbiter` e use `--game <nome>`. Gestos disponíveis: `attack`, `use`, `jump`, `crouch`, `walk`, `sprint`, `walk_back`, `strafe_left`, `strafe_right` e `lean`.
 
 ### Segurança
 

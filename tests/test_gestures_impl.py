@@ -426,3 +426,30 @@ def test_crouch_hip_feature_still_selectable() -> None:
 def test_crouch_gesture_rejects_unknown_feature() -> None:
     with pytest.raises(ValueError, match="feature"):
         crouch_gesture(SHOULDER_CROUCH, "joelho")  # type: ignore[arg-type]
+
+
+def test_walk_back_and_strafe_gestures() -> None:
+    """Spec 019: inclinar para trás e para os lados dispara START/END com histerese."""
+    from inmotion.gestures.lean import strafe_gesture, walk_back_gesture
+
+    back = walk_back_gesture(LEAN, GEOMETRY)
+    left = strafe_gesture("strafe_left", Side.LEFT, LEAN, GEOMETRY)
+    right = strafe_gesture("strafe_right", Side.RIGHT, LEAN, GEOMETRY)
+    rig = Rig([back, left, right])
+
+    for i in range(6):
+        rig.step(make_body(t=i * DT, lean=-0.5))
+    assert rig.kinds("walk_back") == [EventKind.START]
+    assert rig.kinds("strafe_left") == []
+    assert rig.kinds("strafe_right") == []
+
+    for i in range(6, 12):
+        rig.step(make_body(t=i * DT, lean=0.0, lateral_lean=0.5))
+    assert rig.kinds("walk_back") == [EventKind.START, EventKind.END]
+    assert rig.kinds("strafe_left") == [EventKind.START]
+    assert rig.kinds("strafe_right") == []
+
+    for i in range(12, 18):
+        rig.step(make_body(t=i * DT, lean=0.0, lateral_lean=-0.5))
+    assert rig.kinds("strafe_left") == [EventKind.START, EventKind.END]
+    assert rig.kinds("strafe_right") == [EventKind.START]

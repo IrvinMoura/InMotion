@@ -43,11 +43,28 @@ def test_minecraft_arbiter() -> None:
     _, profile = load_config(game="minecraft")
     assert profile is not None
     assert profile.arbiter == ArbiterConfig(
-        priority=("both_arms", "crouch", "jump", "attack", "use", "walk", "sprint"),
+        priority=(
+            "both_arms",
+            "crouch",
+            "jump",
+            "attack",
+            "use",
+            "walk",
+            "sprint",
+            "walk_back",
+            "strafe_left",
+            "strafe_right",
+        ),
         exclusive=(
             frozenset({"crouch", "jump"}),
             frozenset({"crouch", "walk"}),
             frozenset({"crouch", "sprint"}),
+            frozenset({"crouch", "walk_back"}),
+            frozenset({"crouch", "strafe_left"}),
+            frozenset({"crouch", "strafe_right"}),
+            frozenset({"walk", "walk_back"}),
+            frozenset({"sprint", "walk_back"}),
+            frozenset({"strafe_left", "strafe_right"}),
         ),
         combos={"both_arms": frozenset({"attack", "use"})},
     )
@@ -129,3 +146,25 @@ def test_minecraft_arbiter_crouch_beats_walk_and_sprint_jump_coexists() -> None:
     assert arbiter.granted == {"crouch"}
     out = arbiter.resolve([ev("crouch", EventKind.END, 3.0)], 3.0)
     assert arbiter.granted == {"walk", "sprint"}  # voltam quando o agachar solta
+
+
+def test_minecraft_arbiter_walk_back_and_strafe_rules() -> None:
+    """Spec 019: `walk` e `walk_back` são exclusivos, `strafe_*` exclusivos entre si,
+    `walk` convive com `strafe_left`, e `crouch` vence todos."""
+    from inmotion.gestures.base import EventKind, GestureEvent
+    from inmotion.gestures.factory import build_arbiter
+
+    def ev(name: str, kind: EventKind, t: float = 0.0) -> GestureEvent:
+        return GestureEvent(name, kind, t)
+
+    _, profile = load_config(game="minecraft")
+    assert profile is not None
+    arbiter, _ = build_arbiter(BODY_GESTURE_NAMES, profile.arbiter)
+    arbiter.resolve([ev("walk", EventKind.START), ev("strafe_left", EventKind.START)], 0.0)
+    assert arbiter.granted == {"walk", "strafe_left"}
+    arbiter.resolve([ev("walk_back", EventKind.START, 1.0)], 1.0)
+    assert "walk_back" not in arbiter.granted  # `walk` vence `walk_back`
+    arbiter.resolve([ev("strafe_right", EventKind.START, 2.0)], 2.0)
+    assert "strafe_right" not in arbiter.granted  # `strafe_left` vence `strafe_right`
+    arbiter.resolve([ev("crouch", EventKind.START, 3.0)], 3.0)
+    assert arbiter.granted == {"crouch"}

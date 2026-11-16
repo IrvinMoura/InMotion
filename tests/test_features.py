@@ -19,7 +19,10 @@ from inmotion.gestures.features import (
     forward_reach,
     jump_height,
     knee_lift,
+    lean_back,
     lean_forward,
+    lean_left,
+    lean_right,
 )
 from inmotion.types import PoseFrame
 from inmotion.vision.geometry import GeometryConfig
@@ -187,6 +190,32 @@ def test_lean_forward_recovers_synthetic_lean(lean: float) -> None:
 def test_lean_forward_none_cases() -> None:
     assert lean_forward(make_body(with_world=False), GEOMETRY) is None
     assert lean_forward(make_body(visibility=0.0), GEOMETRY) is None
+    assert lean_back(make_body(with_world=False), GEOMETRY) is None
+    assert lean_left(make_body(visibility=0.0), GEOMETRY) is None
+    assert lean_right(make_body(scale=0.05), GEOMETRY) is None
+
+
+@given(lean=st.floats(min_value=-1.2, max_value=0.6))
+def test_lean_back_recovers_synthetic_lean(lean: float) -> None:
+    """Spec 019: inclinar para trás é simétrico a ``lean_forward``."""
+    assert lean_back(make_body(lean=lean), GEOMETRY) == pytest.approx(-lean, abs=1e-9)
+
+
+@given(
+    lat=st.floats(min_value=-0.8, max_value=0.8),
+    scale=st.floats(min_value=0.5, max_value=2.0),
+    dx=st.floats(min_value=150.0, max_value=450.0),
+    dy=st.floats(min_value=180.0, max_value=360.0),
+)
+def test_lateral_lean_scale_and_translation_invariant(
+    lat: float, scale: float, dx: float, dy: float
+) -> None:
+    """Spec 019: ``lean_left``/``lean_right`` recuperam ``±lateral_lean`` (escala/posição)."""
+    pose = make_body(scale=scale, hip_x_px=dx, hip_y_px=dy, lateral_lean=lat, with_world=False)
+    left = lean_left(pose, GEOMETRY)
+    right = lean_right(pose, GEOMETRY)
+    assert left == pytest.approx(lat, abs=1e-6)
+    assert right == pytest.approx(-lat, abs=1e-6)
 
 
 # --- Spec 017: crouch_drop (agachar pelos ombros) ---------------------------------------------

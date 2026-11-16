@@ -338,6 +338,48 @@ def lean_forward(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
     return math.atan2(dz, dy)
 
 
+def lean_back(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
+    """Spec 019 (A9): inclinação do tronco para trás em rad (``-lean_forward``)."""
+    val = lean_forward(pose, geometry)
+    return None if val is None else -val
+
+
+def lean_side(pose: PoseFrame, side: Side, geometry: GeometryConfig) -> float | None:
+    """Spec 019 (A9 lateral): inclinação lateral do tronco no plano da imagem (rad).
+
+    ``atan2(±(x̄_ombros − x̄_quadril), |ȳ_quadril − ȳ_ombros|)`` em pixels. Na imagem
+    não espelhada (ADR 0007), a esquerda da pessoa (``Side.LEFT``) tem ``x`` maior.
+    Invariante a translação e escala. ``None`` com tronco invisível ou degenerado.
+    """
+    if not is_visible(pose, (*_SHOULDERS, *_HIPS), geometry.visibility_threshold):
+        return None
+    px = pose.pixels()
+    l_sh, r_sh = px[_SHOULDERS[0]], px[_SHOULDERS[1]]
+    l_hip, r_hip = px[_HIPS[0]], px[_HIPS[1]]
+    s = float(np.hypot(l_sh[0] - r_sh[0], l_sh[1] - r_sh[1]))
+    if not math.isfinite(s) or s < geometry.min_shoulder_px:
+        return None
+    sh_x = float(l_sh[0] + r_sh[0]) / 2.0
+    sh_y = float(l_sh[1] + r_sh[1]) / 2.0
+    hip_x = float(l_hip[0] + r_hip[0]) / 2.0
+    hip_y = float(l_hip[1] + r_hip[1]) / 2.0
+    dx = sh_x - hip_x if side is Side.LEFT else hip_x - sh_x
+    dy = abs(hip_y - sh_y)
+    if not (math.isfinite(dx) and math.isfinite(dy)) or dy <= 0.0:
+        return None
+    return math.atan2(dx, dy)
+
+
+def lean_left(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
+    """Inclinação lateral para a esquerda da pessoa (rad, > 0 = esquerda)."""
+    return lean_side(pose, Side.LEFT, geometry)
+
+
+def lean_right(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
+    """Inclinação lateral para a direita da pessoa (rad, > 0 = direita)."""
+    return lean_side(pose, Side.RIGHT, geometry)
+
+
 def knee_lift(ctx: FrameContext, side: Side) -> float | None:
     """RF1 (018): ``k = (d − x)/s`` com ``x = ȳ_joelho − ȳ_quadril`` do lado (px).
 

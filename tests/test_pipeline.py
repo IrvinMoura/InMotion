@@ -458,6 +458,9 @@ ALL_KEYS_PROFILE = GameProfile(
         "crouch": Binding("shift", GestureKind.HOLD),
         "walk": Binding("w", GestureKind.HOLD),
         "sprint": Binding("ctrl", GestureKind.HOLD),
+        "walk_back": Binding("s", GestureKind.HOLD),
+        "strafe_left": Binding("a", GestureKind.HOLD),
+        "strafe_right": Binding("d", GestureKind.HOLD),
     },
 )
 PROFILE_KEYS = {b.input for b in ALL_KEYS_PROFILE.bindings.values()}
@@ -972,6 +975,38 @@ def test_march_stops_pitch_but_not_yaw() -> None:
     assert "w" in fake.pressed  # andando
     assert sum(dx for dx, _ in fake.moves) > 0  # o yaw seguiu
     assert sum(dy for _, dy in fake.moves) == 0  # o pitch parou desde o 1º passo
+
+
+def test_lean_stops_pitch_but_not_yaw() -> None:
+    """Spec 019: durante inclinação do tronco o pitch para e o yaw continua livre."""
+    look = HeadLookParams(
+        yaw=ResponseCurve(gain=100.0, dead_zone=0.0, gamma=1.0, v_max=1e6),
+        pitch=ResponseCurve(gain=100.0, dead_zone=0.0, gamma=1.0, v_max=1e6),
+    )
+    fake = FakeInputBackend()
+    safety = SafetyManager(
+        TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
+    )
+    bindings = {
+        "walk_back": Binding("s", GestureKind.HOLD),
+        "strafe_left": Binding("a", GestureKind.HOLD),
+    }
+    pipeline = Pipeline(
+        safety,
+        build_body_gestures(bindings),
+        FpsMeter(window=30),
+        profile=GameProfile("teste", bindings),
+        head_look=look,
+    )
+    for i in range(NEUTRAL_FRAMES):
+        pipeline.step(with_face(make_body(t=i * DT)), i * DT)
+    start = NEUTRAL_FRAMES
+    for i in range(start, start + 30):
+        body = make_body(t=i * DT, lean=-0.5, lateral_lean=0.5)
+        pipeline.step(with_face(body, yaw=0.5, pitch=-0.5), i * DT)
+    assert {"s", "a"} <= fake.pressed
+    assert sum(dx for dx, _ in fake.moves) > 0  # yaw continua funcionando
+    assert sum(dy for _, dy in fake.moves) == 0  # pitch suprimido durante inclinação
 
 
 def test_step_result_exposes_normalized_skeleton_and_raw_vs_filtered_telemetry() -> None:

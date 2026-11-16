@@ -17,6 +17,7 @@ from inmotion.gestures.features import (
     BodyBaseline,
     FrameContext,
     build_context,
+    crouch_drop,
     knee_lift,
 )
 from inmotion.gestures.head_look import HeadLook, HeadLookParams, head_pose
@@ -44,6 +45,8 @@ TORSO: tuple[int, ...] = (
 # Só os ombros: basta para o tracking enquanto o agachar está em curso (ADR 0011).
 SHOULDERS: tuple[int, ...] = (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER)
 _CROUCH = "crouch"
+_LEAN_GESTURES: frozenset[str] = frozenset({"lean", "walk_back", "strafe_left", "strafe_right"})
+_PITCH_SHOULDER_BAND = 0.05
 
 
 @dataclass(frozen=True)
@@ -224,6 +227,16 @@ class Pipeline:
             return False
         return self._crouch.snapshot().state in (GestureState.ARMING, GestureState.ACTIVE)
 
+    def _lean_in_progress(self) -> bool:
+        """Spec 019: inclinação do tronco em ARMING ou ACTIVE enquanto ativo."""
+        if self._needs_reset or self._safety.state is not SafetyState.ACTIVE:
+            return False
+        return any(
+            g.snapshot().state in (GestureState.ARMING, GestureState.ACTIVE)
+            for g in self._gestures
+            if g.name in _LEAN_GESTURES
+        )
+
     def _reset_all(self) -> None:
         if self._pose_filter is not None:
             self._pose_filter.reset()
@@ -298,7 +311,10 @@ class Pipeline:
             events.extend(self._combo.derive(events, t))
         resolved = tuple(self._arbiter.resolve(events, t))
         self._mapper.handle(resolved, t)
-        look = self._look(pose, t, marching=march.steps > 0)
+        cd = crouch_drop(ctx)
+        shoulder_moved = cd is not None and abs(cd) >= _PITCH_SHOULDER_BAND
+        suppress_pitch = march.steps > 0 or self._lean_in_progress() or shoulder_moved
+        look = self._look(pose, t, suppress_pitch=suppress_pitch)
         raw_ctx: FrameContext | None = None
         if self._pose_filter is not None and raw_pose is not None:
             raw_ctx = build_context(
@@ -313,20 +329,19 @@ class Pipeline:
             raw_ctx = replace(raw_ctx, march=march)
         return resolved, look, ctx.skeleton, self._collect_telemetry(raw_ctx, has_values=True)
 
-    def _look(self, pose: PoseFrame, t: float, *, marching: bool) -> tuple[int, int]:
-        """Spec 014: ``head_pose`` → ``HeadLook`` → ``move_rel``, só em ACTIVE com pose.
+    def _look(self, pose: PoseFrame, t: float, *, suppress_pitch: bool) -> tuple[int, int]:
+        """Spec 014/019: ``head_pose`` → ``HeadLook`` → ``move_rel``, só em ACTIVE com pose.
 
         Fora do árbitro (a câmera sempre passa, spec 017). RF5: com o agachar em ARMING ou
-        ACTIVE (estado já atualizado neste frame) a câmera para nos dois eixos; com a marcha
-        em curso (``marching``: algum passo dentro do prazo, spec 018) só o pitch para. O
-        movimento vai pelo ``TrackedInput``, que também o descarta se o input estiver
-        desabilitado.
+        ACTIVE (estado já atualizado neste frame) a câmera para nos dois eixos; durante marcha
+        (spec 018) ou inclinação do tronco (spec 019) só o pitch para. O movimento vai pelo
+        ``TrackedInput``, que também o descarta se o input estiver desabilitado.
         """
         if self._head_look is None or self._head_look_params is None:
             return (0, 0)
         head = head_pose(pose, self._geometry, self._head_look_params.min_ear_px)
         dx, dy = self._head_look.update(
-            head, t, suppress=self._crouch_in_progress(), suppress_pitch=marching
+            head, t, suppress=self._crouch_in_progress(), suppress_pitch=suppress_pitch
         )
         self._safety.input.move_rel(dx, dy)
         return (dx, dy)

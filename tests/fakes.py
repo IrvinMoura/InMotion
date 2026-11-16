@@ -60,6 +60,9 @@ class FakeDirectInput:
             "shift": 42,
             "ctrl": 29,
             "w": 17,
+            "a": 30,
+            "s": 31,
+            "d": 32,
             "f13": None,  # existe no dicionário do pydirectinput, mas sem scancode
         }
         self.calls: list[tuple[str, str]] = []
