@@ -5,7 +5,7 @@
 name = "inmotion"
 version = "0.0.0"
 description = "Controle de jogos por visão computacional com uma webcam (Projeto A3)."
-requires-python = ">=3.10,<3.11"  # ver GUIA_CLAUDE §9: upgrade só via ADR
+requires-python = ">=3.10,<3.11"  # Ambiente validado; veja CONTRIBUTING.md.
 
 # ---------------------------------------------------------------------------
 # Ruff — lint + format
@@ -31,16 +31,16 @@ select = [
     "TID",      # imports banidos (regra de camadas, abaixo)
     "T20",      # sem print: usar logging (spec 002, CA6)
 ]
-# Símbolos matemáticos usados nas docstrings (notação do ROADMAP §5)
+# Símbolos matemáticos usados nas docstrings.
 allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "τ", "∪"]
 
 # Regra de camadas: o núcleo é puro. Estes imports são proibidos por padrão
 # e liberados SÓ nos adaptadores listados em per-file-ignores.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"cv2".msg = "Núcleo puro: cv2 só em adaptadores (CLAUDE.md > Camadas)."
-"mediapipe".msg = "Núcleo puro: mediapipe só no adaptador de pose (CLAUDE.md > Camadas)."
-"pydirectinput".msg = "Núcleo puro: pydirectinput só no backend de input (CLAUDE.md > Camadas)."
-"vgamepad".msg = "Núcleo puro: vgamepad só no backend de gamepad (CLAUDE.md > Camadas)."
+"cv2".msg = "Núcleo puro: cv2 só em adaptadores (CONTRIBUTING.md)."
+"mediapipe".msg = "Núcleo puro: mediapipe só no adaptador de pose (CONTRIBUTING.md)."
+"pydirectinput".msg = "Núcleo puro: pydirectinput só no backend de input (CONTRIBUTING.md)."
+"vgamepad".msg = "Núcleo puro: vgamepad só no backend de gamepad (CONTRIBUTING.md)."
 "time.time".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
 "time.monotonic".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
 "time.perf_counter".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
@@ -97,6 +97,7 @@ module = [
     "inmotion.types",
     "inmotion.ports",
     "inmotion.pipeline",
+    "inmotion.session",
     "inmotion.watchdog",
     "inmotion.vision.landmarks",
     "inmotion.vision.geometry",
@@ -111,7 +112,6 @@ module = [
     "inmotion.gestures.*",
     "inmotion.safety",
     "inmotion.mapping",
-    "inmotion.calibration",
     "inmotion.input.backend",
     "inmotion.config.schema",
     "inmotion.config.validate",
@@ -130,5 +130,5 @@ warn_unused_ignores = true
 
 # Bibliotecas sem stubs
 [[tool.mypy.overrides]]
-module = ["pydirectinput.*", "mediapipe.*", "vgamepad.*"]
+module = ["pydirectinput.*", "mediapipe.*"]
 ignore_missing_imports = true

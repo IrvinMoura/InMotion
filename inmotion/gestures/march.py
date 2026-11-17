@@ -19,8 +19,8 @@ from inmotion.gestures.body import FeatureGesture
 from inmotion.gestures.features import FrameContext
 from inmotion.vision.landmarks import Side
 
-# Passo (spec 018 T0): k parado <= 0,08, no pulo <= 0,14, marchando p95 >= 0,38.
-DEFAULT_STEP_PARAMS = GestureParams(0.30, 0.15, Direction.ABOVE, debounce_frames=1)
+# Passo (spec 018 T0 + ajuste spec 019): k parado <= 0,09, no pulo <= 0,156; 0,22 facilita ativar.
+DEFAULT_STEP_PARAMS = GestureParams(0.22, 0.12, Direction.ABOVE, debounce_frames=1)
 DEFAULT_WALK_PARAMS = GestureParams(0.6, 0.4, Direction.ABOVE, debounce_frames=1)
 # Correr (T8, 11/11/2026): marcha lenta mediana 1,46 a 1,68 passos/s, mas com rajadas de ~1 s
 # até 2,41; marcha rápida mediana 2,71 a 3,26. Liga em 2,5 só após 15 quadros (0,5 s a 30 FPS).
@@ -33,10 +33,10 @@ class MarchParams:
     e a memória do portão do pulo (``jump_gate_hold_s``, RF6b)."""
 
     min_steps: int = 2
-    step_timeout_s: float = 1.2
+    step_timeout_s: float = 1.5
     cadence_alpha: float = 0.3
     jump_gate_hold_s: float = 0.5
-    step_rearm: float = 0.25
+    step_rearm: float = 0.22
     step: GestureParams = field(default_factory=lambda: DEFAULT_STEP_PARAMS)
 
     def __post_init__(self) -> None:

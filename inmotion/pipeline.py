@@ -9,16 +9,28 @@ from inmotion.config.schema import GameProfile
 from inmotion.exit_zone import ExitZoneState
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
-from inmotion.gestures.base import GestureState
-from inmotion.gestures.body import BodyGesture, all_idle
+from inmotion.gestures.base import GestureEvent, GestureKind, GestureState
+from inmotion.gestures.body import BodyGesture, FeatureGesture, all_idle
 from inmotion.gestures.factory import build_arbiter
-from inmotion.gestures.features import BaselineParams, BodyBaseline, build_context, knee_lift
+from inmotion.gestures.features import (
+    BaselineParams,
+    BodyBaseline,
+    FrameContext,
+    build_context,
+    crouch_drop,
+    knee_lift,
+)
 from inmotion.gestures.head_look import HeadLook, HeadLookParams, head_pose
 from inmotion.gestures.march import MarchParams, MarchTracker
 from inmotion.mapping import ActionMapper, MapperParams
 from inmotion.safety import SafetyManager, SafetyState
 from inmotion.types import PoseFrame
-from inmotion.vision.geometry import GeometryConfig, is_visible
+from inmotion.vision.geometry import (
+    GeometryConfig,
+    NormalizedSkeleton,
+    is_visible,
+    normalize_skeleton,
+)
 from inmotion.vision.landmarks import PoseLandmark, Side
 
 # Ombros e quadris: sem eles visíveis a pose é fantasma/parcial e não conta como tracking.
@@ -33,6 +45,21 @@ TORSO: tuple[int, ...] = (
 # Só os ombros: basta para o tracking enquanto o agachar está em curso (ADR 0011).
 SHOULDERS: tuple[int, ...] = (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER)
 _CROUCH = "crouch"
+_LEAN_GESTURES: frozenset[str] = frozenset({"lean", "walk_back", "strafe_left", "strafe_right"})
+_PITCH_SHOULDER_BAND = 0.05
+
+
+@dataclass(frozen=True)
+class GestureTelemetry:
+    """Telemetria de um gesto neste frame (somente leitura para o overlay, spec 009)."""
+
+    name: str
+    kind: GestureKind
+    state: GestureState
+    raw_value: float | None
+    filtered_value: float | None
+    theta_on: float
+    theta_off: float
 
 
 @dataclass(frozen=True)
@@ -45,6 +72,10 @@ class StepResult:
     pose: PoseFrame | None
     exit_zone: ExitZoneState | None = None
     look: tuple[int, int] = (0, 0)  # spec 014: (dx, dy) da câmera enviado neste frame
+    events: tuple[GestureEvent, ...] = ()
+    pressed: frozenset[str] = frozenset()
+    normalized: NormalizedSkeleton | None = None
+    gestures: tuple[GestureTelemetry, ...] = ()
 
 
 class Pipeline:
@@ -82,6 +113,7 @@ class Pipeline:
             BodyBaseline(baseline_params or BaselineParams()),
             BodyBaseline(baseline_params or BaselineParams()),
         )
+        self._lean_baseline = BodyBaseline(baseline_params or BaselineParams())  # spec 019
         self._march = MarchTracker(march_params or MarchParams())  # spec 018
         self._head_look_params = head_look  # spec 014: None = sem câmera pela cabeça
         self._head_look = HeadLook(head_look) if head_look is not None else None
@@ -92,6 +124,9 @@ class Pipeline:
         self._mapper = ActionMapper(profile, safety.input, mapper_params or MapperParams())
         self._was_active = True  # gestos nascem zerados
         self._tracked_since: float | None = None  # início da sequência contínua de pose
+        self._generation = safety.generation
+        self._stall_generation = safety.stall_generation
+        self._needs_reset = False
 
     def step(self, pose: PoseFrame | None, t: float) -> StepResult:
         """on_frame → (se ACTIVE) gestos → árbitro → mapper → FPS.
@@ -116,6 +151,14 @@ class Pipeline:
         ACTIVE sem pose válida ele ainda solta os taps vencidos por tempo.
         """
         raw = pose
+        generation = self._safety.generation
+        if generation != self._generation:
+            self._needs_reset = True
+            self._generation = generation
+        stall_generation = self._safety.stall_generation
+        if stall_generation != self._stall_generation:
+            self._tracked_since = None
+            self._stall_generation = stall_generation
         config = self._safety.config
         required = SHOULDERS if self._crouch_in_progress() else TORSO
         if pose is not None and not is_visible(pose, required, config.min_torso_visibility):
@@ -130,27 +173,45 @@ class Pipeline:
         self._safety.on_frame(t, pose is not None)
         state = self._safety.state
         active = state is SafetyState.ACTIVE
-        if active and not self._was_active:
+        if active and (not self._was_active or self._needs_reset):
             self._reset_all()
+            self._needs_reset = False
         self._was_active = active
         if not active:
             self._mapper.reset()
+        unfiltered = pose
         if self._pose_filter is not None:
             if pose is not None and active:
                 pose = self._pose_filter(pose)
             else:
                 self._pose_filter.reset()  # sem pose ou fora de ACTIVE: recomeça limpo
         look = (0, 0)
-        if active:
-            if pose is not None:
-                look = self._run_gestures(pose, t)
-            else:
+        events: tuple[GestureEvent, ...] = ()
+        display_pose = raw if pose is None else pose
+        if active and pose is not None:
+            events, look, normalized, gestures = self._run_gestures(pose, t, unfiltered)
+        else:
+            if active:
                 self._mapper.update(t)
                 if self._head_look is not None:
                     self._head_look.update(None, t)  # RF6: zera o resto, sem Δt na volta
+            normalized = (
+                normalize_skeleton(display_pose, self._geometry)
+                if display_pose is not None
+                else None
+            )
+            gestures = self._collect_telemetry(None, has_values=False)
         fps = self._fps.update(t)
         return StepResult(
-            t=t, fps=fps, safety_state=state, pose=raw if pose is None else pose, look=look
+            t=t,
+            fps=fps,
+            safety_state=state,
+            pose=display_pose,
+            look=look,
+            events=events,
+            pressed=self._safety.input.pressed,
+            normalized=normalized,
+            gestures=gestures,
         )
 
     def _crouch_in_progress(self) -> bool:
@@ -159,11 +220,27 @@ class Pipeline:
         Em LOST/PAUSED o gesto pode estar parado num estado velho (nada o atualiza até o
         reset da volta a ACTIVE), por isso o estado da segurança também conta.
         """
-        if self._crouch is None or self._safety.state is not SafetyState.ACTIVE:
+        if (
+            self._needs_reset
+            or self._crouch is None
+            or self._safety.state is not SafetyState.ACTIVE
+        ):
             return False
         return self._crouch.snapshot().state in (GestureState.ARMING, GestureState.ACTIVE)
 
+    def _lean_in_progress(self) -> bool:
+        """Spec 019: inclinação do tronco em ARMING ou ACTIVE enquanto ativo."""
+        if self._needs_reset or self._safety.state is not SafetyState.ACTIVE:
+            return False
+        return any(
+            g.snapshot().state in (GestureState.ARMING, GestureState.ACTIVE)
+            for g in self._gestures
+            if g.name in _LEAN_GESTURES
+        )
+
     def _reset_all(self) -> None:
+        if self._pose_filter is not None:
+            self._pose_filter.reset()
         for gesture in self._gestures:
             gesture.reset()
         self._arbiter.reset()
@@ -174,13 +251,51 @@ class Pipeline:
         self._shoulder_baseline.reset()
         for knee_baseline in self._knee_baselines:
             knee_baseline.reset()
+        self._lean_baseline.reset()
         self._march.reset()
         if self._head_look is not None:
             self._head_look.reset()  # RF2: o neutro é medido de novo a cada volta a ACTIVE
 
-    def _run_gestures(self, pose: PoseFrame, t: float) -> tuple[int, int]:
+    def _collect_telemetry(
+        self, raw_ctx: FrameContext | None, *, has_values: bool
+    ) -> tuple[GestureTelemetry, ...]:
+        """Lê snapshots, valores brutos e filtrados para o overlay (sem alterar estado)."""
+        items: list[GestureTelemetry] = []
+        for gesture in self._gestures:
+            snap = gesture.snapshot()
+            if not has_values:
+                raw_val = None
+                filtered_val = None
+            else:
+                filtered_val = gesture.feature_value
+                if raw_ctx is not None and isinstance(gesture, FeatureGesture) and gesture.is_pure:
+                    raw_val = gesture.measure(raw_ctx)
+                else:
+                    raw_val = filtered_val
+            items.append(
+                GestureTelemetry(
+                    name=snap.name,
+                    kind=snap.kind,
+                    state=snap.state,
+                    raw_value=raw_val,
+                    filtered_value=filtered_val,
+                    theta_on=snap.theta_on,
+                    theta_off=snap.theta_off,
+                )
+            )
+        return tuple(items)
+
+    def _run_gestures(
+        self, pose: PoseFrame, t: float, raw_pose: PoseFrame | None = None
+    ) -> tuple[
+        tuple[GestureEvent, ...],
+        tuple[int, int],
+        NormalizedSkeleton | None,
+        tuple[GestureTelemetry, ...],
+    ]:
         """Repouso (estado do frame anterior) → contexto → marcha → gestos → árbitro → mapper
-        → câmera. Devolve o ``(dx, dy)`` da câmera enviado no frame."""
+        → câmera. Devolve os eventos resolvidos, o ``(dx, dy)``, o esqueleto normalizado e a
+        telemetria dos gestos."""
         resting = all_idle(self._gestures)
         ctx = build_context(
             pose,
@@ -190,29 +305,47 @@ class Pipeline:
             resting,
             self._shoulder_baseline,
             self._knee_baselines,
+            self._lean_baseline,
         )
         march = self._march.update(knee_lift(ctx, Side.LEFT), knee_lift(ctx, Side.RIGHT), t)
         ctx = replace(ctx, march=march)  # estado da marcha: uma vez por frame, antes dos gestos
         events = [e for g in self._gestures if (e := g.update(ctx)) is not None]
         if self._combo is not None:
             events.extend(self._combo.derive(events, t))
-        self._mapper.handle(self._arbiter.resolve(events, t), t)
-        return self._look(pose, t, marching=march.steps > 0)
+        resolved = tuple(self._arbiter.resolve(events, t))
+        self._mapper.handle(resolved, t)
+        cd = crouch_drop(ctx)
+        shoulder_moved = cd is not None and abs(cd) >= _PITCH_SHOULDER_BAND
+        suppress_pitch = march.steps > 0 or self._lean_in_progress() or shoulder_moved
+        look = self._look(pose, t, suppress_pitch=suppress_pitch)
+        raw_ctx: FrameContext | None = None
+        if self._pose_filter is not None and raw_pose is not None:
+            raw_ctx = build_context(
+                raw_pose,
+                t,
+                self._geometry,
+                self._baseline,
+                resting=False,
+                shoulder_baseline=self._shoulder_baseline,
+                knee_baselines=self._knee_baselines,
+                lean_baseline=self._lean_baseline,
+            )
+            raw_ctx = replace(raw_ctx, march=march)
+        return resolved, look, ctx.skeleton, self._collect_telemetry(raw_ctx, has_values=True)
 
-    def _look(self, pose: PoseFrame, t: float, *, marching: bool) -> tuple[int, int]:
-        """Spec 014: ``head_pose`` → ``HeadLook`` → ``move_rel``, só em ACTIVE com pose.
+    def _look(self, pose: PoseFrame, t: float, *, suppress_pitch: bool) -> tuple[int, int]:
+        """Spec 014/019: ``head_pose`` → ``HeadLook`` → ``move_rel``, só em ACTIVE com pose.
 
         Fora do árbitro (a câmera sempre passa, spec 017). RF5: com o agachar em ARMING ou
-        ACTIVE (estado já atualizado neste frame) a câmera para nos dois eixos; com a marcha
-        em curso (``marching``: algum passo dentro do prazo, spec 018) só o pitch para. O
-        movimento vai pelo ``TrackedInput``, que também o descarta se o input estiver
-        desabilitado.
+        ACTIVE (estado já atualizado neste frame) a câmera para nos dois eixos; durante marcha
+        (spec 018) ou inclinação do tronco (spec 019) só o pitch para. O movimento vai pelo
+        ``TrackedInput``, que também o descarta se o input estiver desabilitado.
         """
         if self._head_look is None or self._head_look_params is None:
             return (0, 0)
         head = head_pose(pose, self._geometry, self._head_look_params.min_ear_px)
         dx, dy = self._head_look.update(
-            head, t, suppress=self._crouch_in_progress(), suppress_pitch=marching
+            head, t, suppress=self._crouch_in_progress(), suppress_pitch=suppress_pitch
         )
         self._safety.input.move_rel(dx, dy)
         return (dx, dy)

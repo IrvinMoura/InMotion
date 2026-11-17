@@ -42,8 +42,7 @@ class RecordingInputBackend:
 class ReplayResult:
     """Saída de um replay.
 
-    ``events`` segue vazio: o ``Pipeline`` da spec 008 ainda não expõe os ``GestureEvent``
-    do frame (pendente para a 010/011); a comparação e as métricas usam ``inputs``.
+    ``events`` contém os eventos liberados pelo árbitro em cada frame.
     ``snapshots`` só existe se pedido.
     """
 
@@ -68,14 +67,16 @@ def run_replay(
     backend = RecordingInputBackend(lambda: now[0])
     pipeline, safety = build_pipeline(backend)
     snapshots: list[StepResult] = []
+    events: list[GestureEvent] = []
     with safety.guard():
         for t, pose in recording.poses():
             now[0] = t
             result = pipeline.step(pose, t)
+            events.extend(result.events)
             if keep_snapshots:
                 snapshots.append(result)
     return ReplayResult(
-        events=(),
+        events=tuple(events),
         inputs=tuple(backend.records),
         snapshots=tuple(snapshots) if keep_snapshots else None,
     )

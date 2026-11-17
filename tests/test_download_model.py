@@ -92,3 +92,12 @@ def test_network_error_returns_failure_and_leaves_no_partial_file(tmp_path: Path
     code = main(["--models-dir", str(tmp_path)], urlopen=broken)
     assert code != 0
     assert list(tmp_path.iterdir()) == []
+
+
+def test_empty_download_preserves_previous_model(tmp_path: Path) -> None:
+    target = tmp_path / "pose_landmarker_full.task"
+    target.write_bytes(b"antigo")
+    code = main(["--models-dir", str(tmp_path), "--force"], urlopen=FakeUrlopen(b""))
+    assert code == 1
+    assert target.read_bytes() == b"antigo"
+    assert not target.with_suffix(".task.part").exists()

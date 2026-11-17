@@ -122,9 +122,11 @@ class FilterConfig:
 
 @dataclass(frozen=True)
 class OverlayConfig:
-    """Janela de debug: ``enabled=False`` equivale a ``--no-overlay`` (mais FPS)."""
+    """Janela de debug: ``enabled=False`` equivale a ``--no-overlay`` (mais FPS); ``mirror``
+    espelha o quadro na tela (A4)."""
 
     enabled: bool = True
+    mirror: bool = True
 
 
 @dataclass(frozen=True)
@@ -231,6 +233,13 @@ def validate_profile(
 
     if profile.arbiter != DEFAULT_ARBITER:
         _validate_arbiter(profile.arbiter, known_gestures)
+    formed = [
+        name
+        for name, members in profile.arbiter.combos.items()
+        if members <= profile.bindings.keys() and name in profile.arbiter.priority
+    ]
+    if len(formed) > 1:
+        raise ConfigError("arbiter.combos", "só um combo ativo por perfil é suportado")
 
 
 def _validate_arbiter(arbiter: ArbiterConfig, known_gestures: frozenset[str]) -> None:

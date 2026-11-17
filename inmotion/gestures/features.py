@@ -28,6 +28,8 @@ _ARM: dict[Side, tuple[PoseLandmark, PoseLandmark, PoseLandmark]] = {
 if TYPE_CHECKING:
     from inmotion.gestures.march import MarchState
 
+_EYES = (PoseLandmark.LEFT_EYE, PoseLandmark.RIGHT_EYE)
+_MOUTH = (PoseLandmark.MOUTH_LEFT, PoseLandmark.MOUTH_RIGHT)
 _HIPS = (PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP)
 _SHOULDERS = (PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER)
 _LEG: dict[Side, tuple[PoseLandmark, PoseLandmark]] = {
@@ -132,6 +134,8 @@ class FrameContext:
     knee_dist_right_px: float | None = None
     knee_base_left_px: float | None = None
     knee_base_right_px: float | None = None
+    # Spec 019: ângulo de inclinação frontal em repouso (rad, compensa viés do MediaPipe).
+    lean_baseline_rad: float | None = None
     # Estado da marcha do frame (preenchido pelo pipeline, uma vez por frame, antes dos gestos).
     march: MarchState | None = None
 
@@ -176,6 +180,7 @@ def build_context(
     resting: bool,
     shoulder_baseline: BodyBaseline | None = None,
     knee_baselines: tuple[BodyBaseline, BodyBaseline] | None = None,
+    lean_baseline: BodyBaseline | None = None,
 ) -> FrameContext:
     """Monta o contexto do frame: esqueleto normalizado (A6), ``s``, ``h`` e as bases R7.
 
@@ -203,6 +208,12 @@ def build_context(
             else shoulder_baseline.value
         )
     skeleton = normalize_skeleton(pose, geometry)
+    lean_base: float | None = None
+    if lean_baseline is not None:
+        lf = lean_forward(pose, geometry)
+        lean_base = (
+            lean_baseline.update(lf, resting, scale=1.0) if lf is not None else lean_baseline.value
+        )
     knee_base: tuple[float | None, float | None] = (None, None)
     if knee_baselines is not None:
         knee_base = (knee_baselines[0].value, knee_baselines[1].value)
@@ -219,6 +230,7 @@ def build_context(
             shoulder_base,
             knee_base_left_px=knee_base[0],
             knee_base_right_px=knee_base[1],
+            lean_baseline_rad=lean_base,
         )
     px = pose.pixels()
     hip_y = float((px[_HIPS[0], 1] + px[_HIPS[1], 1]) / 2.0)
@@ -250,6 +262,7 @@ def build_context(
         dist_right,
         knee_base[0],
         knee_base[1],
+        lean_baseline_rad=lean_base,
     )
 
 
@@ -336,6 +349,110 @@ def lean_forward(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
     if not (math.isfinite(dz) and math.isfinite(dy)) or (dz == 0.0 and dy == 0.0):
         return None
     return math.atan2(dz, dy)
+
+
+def lean_back(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
+    """Spec 019 (A9): inclinação do tronco para trás em rad (``-lean_forward``)."""
+    val = lean_forward(pose, geometry)
+    return None if val is None else -val
+
+
+def lean_direction_2d(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
+    """Spec 019: sinal 2D da inclinação sagital pelo eixo dos ombros e rosto (olhos/boca).
+
+    Compara a distância vertical da boca ao eixo dos ombros ``ȳ_ombros − ȳ_boca`` com a
+    altura olhos-boca ``ȳ_boca − ȳ_olhos``. Positivo ao inclinar para frente (o rosto
+    aproxima-se do eixo dos ombros) e negativo ao inclinar para trás (o queixo sobe e o
+    rosto encurta em perspectiva), sem depender de profundidade 3D.
+    """
+    if not is_visible(pose, (*_EYES, *_MOUTH, *_SHOULDERS), geometry.visibility_threshold):
+        return None
+    px = pose.pixels()
+    l_sh, r_sh = px[_SHOULDERS[0]], px[_SHOULDERS[1]]
+    s = float(np.hypot(l_sh[0] - r_sh[0], l_sh[1] - r_sh[1]))
+    if not math.isfinite(s) or s < geometry.min_shoulder_px:
+        return None
+    sh_y = float(l_sh[1] + r_sh[1]) / 2.0
+    eye_y = float(px[_EYES[0], 1] + px[_EYES[1], 1]) / 2.0
+    mouth_y = float(px[_MOUTH[0], 1] + px[_MOUTH[1], 1]) / 2.0
+    face_h = mouth_y - eye_y
+    mouth_to_sh = sh_y - mouth_y
+    if not (math.isfinite(face_h) and math.isfinite(mouth_to_sh)) or face_h <= 1.0:
+        return None
+    return 1.5 - (mouth_to_sh / face_h)
+
+
+def lean_back_rel(ctx: FrameContext, geometry: GeometryConfig) -> float | None:
+    """Spec 019: inclinação sagital (frente ou trás, sem inclinar para os lados).
+
+    Combina o encurtamento 2D da altura vertical do tronco ``(b_tronco − h_tronco)/s``
+    (independente de profundidade) com o desvio 3D ``|lean_forward − b_lean|``. Zera
+    durante marcha, pulo/agachamento ou inclinação lateral (``|lean_left| >= 0,20``).
+    """
+    lf = lean_forward(ctx.pose, geometry)
+    if ctx.lean_baseline_rad is None and ctx.shoulder_baseline_px is None:
+        return -lf if (lf is not None and lf < 0.0) else None
+    if ctx.march is not None and (ctx.march.steps > 0 or ctx.march.knee_lifted_recently):
+        return 0.0
+    jh = jump_height(ctx)
+    cd = crouch_drop(ctx)
+    if (jh is not None and abs(jh) >= 0.12) or (cd is not None and cd >= 0.55):
+        return 0.0
+    lat = lean_left(ctx.pose, geometry)
+    lat_rad = abs(lat) if lat is not None else 0.0
+    if lat_rad >= 0.20:
+        return 0.0
+    px = ctx.pose.pixels()
+    s = ctx.shoulder_px
+    theta_2d = 0.0
+    if s is not None and ctx.shoulder_baseline_px is not None and ctx.baseline_px is not None:
+        base_th = (ctx.baseline_px - ctx.shoulder_baseline_px) / s
+        hp_y = float(px[_HIPS[0], 1] + px[_HIPS[1], 1]) / 2.0
+        sh_y = float(px[_SHOULDERS[0], 1] + px[_SHOULDERS[1], 1]) / 2.0
+        cur_th = (hp_y - sh_y) / s
+        theta_2d = max(0.0, (base_th - cur_th) - 1.5 * (1.0 - math.cos(lat_rad)))
+    theta_3d = (
+        abs(lf - ctx.lean_baseline_rad)
+        if (lf is not None and ctx.lean_baseline_rad is not None)
+        else 0.0
+    )
+    return max(theta_2d, theta_3d)
+
+
+def lean_side(pose: PoseFrame, side: Side, geometry: GeometryConfig) -> float | None:
+    """Spec 019 (A9 lateral): inclinação lateral do tronco no plano da imagem (rad).
+
+    ``atan2(±(x̄_ombros − x̄_quadril), |ȳ_quadril − ȳ_ombros|)`` em pixels. Na imagem
+    não espelhada (ADR 0007), a esquerda da pessoa (``Side.LEFT``) tem ``x`` maior.
+    Invariante a translação e escala. ``None`` com tronco invisível ou degenerado.
+    """
+    if not is_visible(pose, (*_SHOULDERS, *_HIPS), geometry.visibility_threshold):
+        return None
+    px = pose.pixels()
+    l_sh, r_sh = px[_SHOULDERS[0]], px[_SHOULDERS[1]]
+    l_hip, r_hip = px[_HIPS[0]], px[_HIPS[1]]
+    s = float(np.hypot(l_sh[0] - r_sh[0], l_sh[1] - r_sh[1]))
+    if not math.isfinite(s) or s < geometry.min_shoulder_px:
+        return None
+    sh_x = float(l_sh[0] + r_sh[0]) / 2.0
+    sh_y = float(l_sh[1] + r_sh[1]) / 2.0
+    hip_x = float(l_hip[0] + r_hip[0]) / 2.0
+    hip_y = float(l_hip[1] + r_hip[1]) / 2.0
+    dx = sh_x - hip_x if side is Side.LEFT else hip_x - sh_x
+    dy = abs(hip_y - sh_y)
+    if not (math.isfinite(dx) and math.isfinite(dy)) or dy <= 0.0:
+        return None
+    return math.atan2(dx, dy)
+
+
+def lean_left(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
+    """Inclinação lateral para a esquerda da pessoa (rad, > 0 = esquerda)."""
+    return lean_side(pose, Side.LEFT, geometry)
+
+
+def lean_right(pose: PoseFrame, geometry: GeometryConfig) -> float | None:
+    """Inclinação lateral para a direita da pessoa (rad, > 0 = direita)."""
+    return lean_side(pose, Side.RIGHT, geometry)
 
 
 def knee_lift(ctx: FrameContext, side: Side) -> float | None:

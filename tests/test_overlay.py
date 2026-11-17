@@ -35,6 +35,19 @@ def test_render_without_pose() -> None:
     assert out.any()  # o texto de estado foi desenhado
 
 
+def test_overlay_ignores_missing_and_out_of_frame_coordinates() -> None:
+    from dataclasses import replace
+
+    result = result_with_pose()
+    landmarks = result.pose.landmarks.copy()
+    landmarks[0, :2] = np.nan
+    landmarks[1, :2] = np.inf
+    landmarks[2, :2] = 1e20
+    pose = replace(result.pose, landmarks=landmarks)
+    out = render(blank(), replace(result, pose=pose))
+    assert out.shape == blank().shape
+
+
 def test_render_draws_something_with_pose() -> None:
     out = render(blank(), result_with_pose())
     assert out[60, 80].any()  # ponto do nariz
@@ -92,3 +105,76 @@ def test_shows_handedness_label() -> None:
     assert right[row].any()
     assert not np.array_equal(left[row], right[row])
     assert np.array_equal(plain[:52], left[:52])  # o resto do quadro não muda
+
+
+def test_mirror_flips_image_and_pose_preserving_readable_hud() -> None:
+    """Spec 009 (A4): ``mirror=True`` espelha frame, esqueleto e mantém o HUD legível."""
+    from inmotion.pipeline import StepResult
+    from inmotion.safety import SafetyState
+    from inmotion.types import PoseFrame
+
+    img = np.zeros((120, 160, 3), dtype=np.uint8)
+    img[:, :40] = (200, 0, 0)  # faixa azul só na esquerda da câmera crua
+    lm = np.full((33, 5), np.nan, dtype=np.float64)
+    lm[0] = (0.25, 0.5, 0.0, 1.0, 1.0)  # x=40, y=60 na imagem crua
+    pose = PoseFrame(t=0.0, landmarks=lm, image_size=(160, 120))
+    res = StepResult(t=0.0, fps=30.0, safety_state=SafetyState.ACTIVE, pose=pose)
+
+    out = render(img, res, mirror=True)
+    # Faixa azul foi para a direita (160 - 40 .. 160); ponto em x=40 foi para 160 - 1 - 40 = 119.
+    assert out[110, 150, 0] == 200
+    assert out[60, 119, 1] == 255
+    assert out[60, 119, 2] == 255  # ponto amarelo espelhado
+    # Texto FPS no canto superior esquerdo (em área preta do espelho) permanece desenhado lá.
+    assert out[8:26, 8:60].any()
+
+
+def test_skeleton_bones_and_debug_panels_rendered() -> None:
+    """Spec 009: ossos conectados, esqueleto normalizado M=S*R*T e telemetria no frame."""
+    from inmotion.gestures.base import GestureKind, GestureState
+    from inmotion.pipeline import GestureTelemetry, StepResult
+    from inmotion.safety import SafetyState
+    from inmotion.types import PoseFrame
+    from inmotion.vision.geometry import NormalizedSkeleton
+    from inmotion.vision.landmarks import PoseLandmark
+
+    img = np.zeros((480, 640, 3), dtype=np.uint8)
+    lm = np.full((33, 5), np.nan, dtype=np.float64)
+    lm[PoseLandmark.LEFT_SHOULDER] = (0.4, 0.3, 0.0, 1.0, 1.0)
+    lm[PoseLandmark.RIGHT_SHOULDER] = (0.6, 0.3, 0.0, 1.0, 1.0)
+    pose = PoseFrame(t=0.0, landmarks=lm, image_size=(640, 480))
+
+    norm_pts = np.zeros((33, 3), dtype=np.float64)
+    norm_pts[PoseLandmark.LEFT_SHOULDER] = (-0.5, -1.0, 0.0)
+    norm_pts[PoseLandmark.RIGHT_SHOULDER] = (0.5, -1.0, 0.0)
+    skel = NormalizedSkeleton(
+        points=norm_pts, matrix=np.eye(3, dtype=np.float64), shoulder_px=128.0
+    )
+    tele = (
+        GestureTelemetry(
+            name="crouch",
+            kind=GestureKind.HOLD,
+            state=GestureState.ACTIVE,
+            raw_value=1.15,
+            filtered_value=1.05,
+            theta_on=0.90,
+            theta_off=0.60,
+        ),
+    )
+    res = StepResult(
+        t=0.0,
+        fps=60.0,
+        safety_state=SafetyState.ACTIVE,
+        pose=pose,
+        look=(10, -5),
+        pressed=frozenset({"shift"}),
+        normalized=skel,
+        gestures=tele,
+    )
+
+    out = render(img, res, handedness="right", mirror=False)
+    # Ponto médio entre os ombros (320, 144) foi ligado por osso.
+    assert out[144, 320].any()
+    # Painel M=S*R*T no canto inferior direito e painel de telemetria no inferior esquerdo.
+    assert out[320:472, 488:632].any()
+    assert out[420:472, 8:378].any()

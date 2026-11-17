@@ -24,6 +24,7 @@ def punch_gesture(
         GestureKind.HOLD,
         params,
         lambda ctx: forward_reach(ctx.pose, side, geometry),
+        pure=True,
     )
 
 

@@ -52,8 +52,11 @@ gestures:
   # inclinar máx 0,22; agachar mediana >= 1,18. theta_on 0,9 = 1,36x a agachadinha e dá
   # mais folga ao ARMING com o quadril ainda visível (com 1,0: visibilidade mín 0,59).
   # Com crouch.feature: hip os valores antigos eram theta_on 0.35 e theta_off 0.25.
-  crouch: {theta_on: 0.9,  theta_off: 0.6,  direction: above, debounce_frames: 4, cooldown_s: 0.0}
-  lean:   {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  crouch:       {theta_on: 0.9,  theta_off: 0.6,  direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  lean:         {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  walk_back:    {theta_on: 0.22, theta_off: 0.12, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  strafe_left:  {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
+  strafe_right: {theta_on: 0.30, theta_off: 0.20, direction: above, debounce_frames: 4, cooldown_s: 0.0}
   # walk e sprint (spec 018): sinais do MarchTracker; o início e o fim do andar vêm de
   # march.min_steps e march.step_timeout_s. Valores iniciais da T0 de 01/11/2026.
   walk:   {theta_on: 0.6,  theta_off: 0.4,  direction: above, debounce_frames: 1, cooldown_s: 0.0}
@@ -89,9 +92,9 @@ baseline:
 # O limiar de correr (f_on/f_off) fica em gestures.sprint.
 march:
   min_steps: 2
-  step_timeout_s: 1.2
+  step_timeout_s: 1.5
   cadence_alpha: 0.3   # T6: com 0,5 a marcha lenta passava de 1,8 passos/s (ctrl falso)
-  step: {theta_on: 0.30, theta_off: 0.15, direction: above, debounce_frames: 1, cooldown_s: 0.0}
+  step: {theta_on: 0.22, theta_off: 0.12, direction: above, debounce_frames: 1, cooldown_s: 0.0}
   # Portão do pulo (RF6b): sem pulo por este tempo depois de um joelho erguido. O quique do
   # quadril vem logo após o joelho descer; 0,3 s ainda deixava 1 pulo falso a 1,5 m e 0,5 s
   # zerou, mantendo os 3 pulos reais de todas as sessões (T6, 01/11/2026).
@@ -99,7 +102,7 @@ march:
   # Rearme do passo (T8): depois de um passo, o lado só conta outro quando o joelho é visto
   # abaixo disto. Sem isso um quadro perdido fazia o mesmo levantamento contar 2-3 vezes
   # (marcha lenta de 1,4 passos/s lida como 2,6). Com 0,15 a marcha rápida perdia passos.
-  step_rearm: 0.25
+  step_rearm: 0.22
 
 # Câmera pela cabeça (spec 014). Valores da T0 (sessões guiadas de 12/11/2026, 2 m e 1,5 m);
 # nunca mude "no olho". yaw = deslocamento do nariz / distância entre as orelhas (> 0 =
@@ -159,6 +162,7 @@ exit_zone:
 
 overlay:
   enabled: true           # false = sem janela de debug (mais FPS)
+  mirror: true            # A4: espelhamento horizontal na exibicao
 
 logging:
   level: INFO             # DEBUG | INFO | WARNING | ERROR

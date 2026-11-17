@@ -16,6 +16,7 @@ EXPECTED_ARGS = [
     "--config",
     "--game",
     "--set",
+    "--profile",
 ]
 
 
@@ -104,6 +105,40 @@ def test_valid_profile_reaches_model_check(tmp_path: Path) -> None:
     proc = _run_cli("--game", "minecraft", "--model-dir", str(tmp_path), "--no-overlay")
     assert proc.returncode == 2
     assert "download_model.py" in proc.stdout + proc.stderr
+
+
+def test_user_profile_layer_is_available_from_cli(tmp_path: Path) -> None:
+    from inmotion.__main__ import build_parser, resolve_config
+
+    profile_path = tmp_path / "profile.yaml"
+    profile_path.write_text("handedness: left\ncamera:\n  index: 3\n", encoding="utf-8")
+    config, _ = resolve_config(
+        build_parser().parse_args(
+            [
+                "--game",
+                "minecraft",
+                "--profile",
+                str(profile_path),
+                "--set",
+                "camera.index=2",
+            ]
+        )
+    )
+    assert config.handedness == "left"
+    assert config.camera.index == 2
+
+
+def test_unknown_hotkey_fails_before_model_or_camera() -> None:
+    proc = _run_cli("--set", "safety.pause_key=banana")
+    assert proc.returncode == 2
+    assert "banana" in proc.stderr
+    assert "Traceback" not in proc.stderr
+
+
+def test_binding_cannot_trigger_pause_key() -> None:
+    proc = _run_cli("--game", "minecraft", "--set", "bindings.jump.input=f8")
+    assert proc.returncode == 2
+    assert "bindings.jump.input" in proc.stderr
 
 
 def test_set_handedness_left_swaps_arms() -> None:

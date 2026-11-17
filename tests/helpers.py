@@ -56,6 +56,7 @@ def make_body(
     hip_x_px: float = 320.0,
     hip_y_px: float = 300.0,
     lean: float = 0.0,
+    lateral_lean: float = 0.0,
     left_arm: Arm = ARM_HANGING,
     right_arm: Arm = ARM_HANGING,
     size: tuple[int, int] = (640, 480),
@@ -71,6 +72,8 @@ def make_body(
 
     ``scale`` multiplica só os pixels (aproximar da câmera); o world é métrico e não muda.
     ``lean`` (rad) inclina o tronco para frente: os ombros vão em direção à câmera (z < 0).
+    ``lateral_lean`` (rad) inclina para os lados: positivo = esquerda da pessoa (+x na
+    imagem não espelhada), negativo = direita.
     ``hips_visible=False`` tira os quadris do quadro (visibilidade 0); ``shoulder_dy_px``
     desce os ombros na imagem (pixels, y cresce para baixo), como no agachar (spec 017).
     Spec 018: ``knee_lift_left/right`` sobem o joelho do lado em larguras de ombro (``k`` da
@@ -79,7 +82,13 @@ def make_body(
     """
     world = np.zeros((N_LANDMARKS, 4), dtype=np.float64)
     world[:, 3] = visibility
-    up = np.array([0.0, -math.cos(lean), -math.sin(lean)])  # quadril -> ombros
+    up = np.array(
+        [
+            math.cos(lean) * math.sin(lateral_lean),
+            -math.cos(lean) * math.cos(lateral_lean),
+            -math.sin(lean),
+        ]
+    )  # quadril -> ombros
     sh_center = TORSO_M * up
     half_sh = np.array([SHOULDER_WIDTH_M / 2.0, 0.0, 0.0])
     left_sh, right_sh = sh_center + half_sh, sh_center - half_sh

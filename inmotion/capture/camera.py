@@ -46,6 +46,12 @@ class Camera:
         self._next_index = 0
         self._error: BaseException | None = None
         self._actual: tuple[int, int, float] = (0, 0, 0.0)
+        self._resolved_index: int = config.index
+
+    @property
+    def resolved_index(self) -> int:
+        """Índice efetivo aberto (pode diferir de config.index se usou fallback)."""
+        return self._resolved_index
 
     @property
     def actual(self) -> tuple[int, int, float]:
@@ -61,11 +67,28 @@ class Camera:
         if self._thread is not None:
             raise RuntimeError("Camera já iniciada")
         cfg = self._config
-        cap = self._factory(cfg.index, _BACKENDS[cfg.backend])
-        self._cap = cap
+        backend_api = _BACKENDS[cfg.backend]
+        cap = self._factory(cfg.index, backend_api)
+        resolved_index = cfg.index
         if not cap.isOpened():
             cap.release()
-            raise OSError(f"não foi possível abrir a câmera {cfg.index} ({cfg.backend})")
+            fallback_index = 0 if cfg.index == 1 else (1 if cfg.index == 0 else None)
+            if fallback_index is not None:
+                _log.warning(
+                    "Câmera %d não disponível. Tentando fallback para câmera %d (%s)",
+                    cfg.index,
+                    fallback_index,
+                    cfg.backend,
+                )
+                cap = self._factory(fallback_index, backend_api)
+                if cap.isOpened():
+                    resolved_index = fallback_index
+                else:
+                    cap.release()
+            if not cap.isOpened():
+                raise OSError(f"não foi possível abrir a câmera {cfg.index} ({cfg.backend})")
+        self._cap = cap
+        self._resolved_index = resolved_index
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc(*cfg.fourcc))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
@@ -79,7 +102,7 @@ class Camera:
         )
         _log.info(
             "câmera %d (%s): pedido %dx%d@%d %s, obtido %dx%d@%.1f",
-            cfg.index,
+            resolved_index,
             cfg.backend,
             cfg.width,
             cfg.height,

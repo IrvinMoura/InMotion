@@ -129,6 +129,44 @@ def test_gestures_reset_when_resuming_from_pause() -> None:
     assert spy.resets == 1
 
 
+def test_watchdog_between_steps_resets_and_represses_held_gesture() -> None:
+    spy = SpyGesture()
+    pipeline, safety, fake = make_pipeline(spy)
+    pipeline.step(make_pose({}, t=0.0), 0.0)
+    assert fake.pressed == {"space"}
+    safety.on_stall()
+    assert not fake.pressed
+    result = pipeline.step(make_pose({}, t=1.0), 1.0)
+    assert spy.resets == 1
+    assert result.pressed == frozenset({"space"})
+    assert fake.events.count(("press", "space")) == 2
+
+
+def test_pause_and_resume_between_steps_still_resets_gestures() -> None:
+    spy = SpyGesture()
+    pipeline, safety, fake = make_pipeline(spy)
+    pipeline.step(make_pose({}, t=0.0), 0.0)
+    safety.on_hotkeys(frozenset({"f8"}))
+    safety.on_hotkeys(frozenset())
+    safety.on_hotkeys(frozenset({"f8"}))
+    pipeline.step(make_pose({}, t=0.1), 0.1)
+    assert spy.resets == 1
+    assert fake.pressed == {"space"}
+
+
+def test_watchdog_requires_continuous_tracking_again() -> None:
+    spy = SpyGesture()
+    pipeline, safety, fake = build([spy], config=SafetyConfig(min_track_s=0.1))
+    pipeline.step(make_pose({}, t=0.0), 0.0)
+    pipeline.step(make_pose({}, t=0.11), 0.11)
+    assert fake.pressed == {"space"}
+    safety.on_stall()
+    pipeline.step(make_pose({}, t=1.0), 1.0)
+    assert fake.pressed == set()
+    pipeline.step(make_pose({}, t=1.11), 1.11)
+    assert fake.pressed == {"space"}
+
+
 def test_step_result_carries_t_pose_and_fps() -> None:
     spy = SpyGesture()
     pipeline, _, _ = make_pipeline(spy)
@@ -420,6 +458,9 @@ ALL_KEYS_PROFILE = GameProfile(
         "crouch": Binding("shift", GestureKind.HOLD),
         "walk": Binding("w", GestureKind.HOLD),
         "sprint": Binding("ctrl", GestureKind.HOLD),
+        "walk_back": Binding("s", GestureKind.HOLD),
+        "strafe_left": Binding("a", GestureKind.HOLD),
+        "strafe_right": Binding("d", GestureKind.HOLD),
     },
 )
 PROFILE_KEYS = {b.input for b in ALL_KEYS_PROFILE.bindings.values()}
@@ -714,7 +755,7 @@ def test_w_released_within_step_timeout_after_last_step() -> None:
             release_t = pose.t
     assert release_t is not None
     elapsed = release_t - last_step_i * DT
-    assert 1.2 <= elapsed <= 1.2 + 2 * DT
+    assert 1.5 <= elapsed <= 1.5 + 2 * DT
 
 
 def test_fast_march_adds_ctrl_and_both_release_at_the_end() -> None:
@@ -934,3 +975,79 @@ def test_march_stops_pitch_but_not_yaw() -> None:
     assert "w" in fake.pressed  # andando
     assert sum(dx for dx, _ in fake.moves) > 0  # o yaw seguiu
     assert sum(dy for _, dy in fake.moves) == 0  # o pitch parou desde o 1º passo
+
+
+def test_lean_stops_pitch_but_not_yaw() -> None:
+    """Spec 019: durante inclinação do tronco o pitch para e o yaw continua livre."""
+    look = HeadLookParams(
+        yaw=ResponseCurve(gain=100.0, dead_zone=0.0, gamma=1.0, v_max=1e6),
+        pitch=ResponseCurve(gain=100.0, dead_zone=0.0, gamma=1.0, v_max=1e6),
+    )
+    fake = FakeInputBackend()
+    safety = SafetyManager(
+        TrackedInput(fake, MOUSE_BUTTONS), SafetyConfig(lost_timeout_s=0.2, min_track_s=0.0)
+    )
+    bindings = {
+        "walk_back": Binding("s", GestureKind.HOLD),
+        "strafe_left": Binding("a", GestureKind.HOLD),
+    }
+    pipeline = Pipeline(
+        safety,
+        build_body_gestures(bindings),
+        FpsMeter(window=30),
+        profile=GameProfile("teste", bindings),
+        head_look=look,
+    )
+    for i in range(NEUTRAL_FRAMES):
+        pipeline.step(with_face(make_body(t=i * DT)), i * DT)
+    start = NEUTRAL_FRAMES
+    for i in range(start, start + 30):
+        body = make_body(t=i * DT, lean=-0.5)
+        pipeline.step(with_face(body, yaw=0.5, pitch=-0.5), i * DT)
+    assert "s" in fake.pressed
+    assert sum(dx for dx, _ in fake.moves) > 0  # yaw continua funcionando
+    assert sum(dy for _, dy in fake.moves) == 0  # pitch suprimido durante inclinação
+
+
+def test_step_result_exposes_normalized_skeleton_and_raw_vs_filtered_telemetry() -> None:
+    """Spec 009: ``StepResult`` traz ``normalized`` e telemetria bruto vs filtrado."""
+    from inmotion.config.schema import FilterConfig, GameProfile
+    from inmotion.filters.ema import EmaParams
+    from inmotion.fps import FpsMeter
+    from inmotion.gestures.base import Direction, GestureKind, GestureParams
+    from inmotion.gestures.crouch import crouch_gesture
+    from inmotion.pipeline import Pipeline
+    from inmotion.safety import SafetyConfig, SafetyManager, TrackedInput
+    from inmotion.session import pose_filter_from_config
+    from inmotion.vision.landmarks import PoseLandmark
+    from tests.fakes import FakeInputBackend
+
+    safety = SafetyManager(TrackedInput(FakeInputBackend()), SafetyConfig(min_track_s=0.0))
+    crouch = crouch_gesture(GestureParams(0.9, 0.6, Direction.ABOVE), feature="shoulders")
+    ema = pose_filter_from_config(FilterConfig(kind="ema", ema=EmaParams(alpha=0.2, gap_max_s=1.0)))
+    profile = GameProfile("teste", {"crouch": Binding("shift", GestureKind.HOLD)})
+    pipe = Pipeline(safety, [crouch], FpsMeter(), ema, profile=profile)
+
+    def _pose(t: float, shoulder_y: float) -> PoseFrame:
+        lm = np.zeros((33, 5), dtype=np.float64)
+        lm[:, 3:] = 1.0
+        lm[PoseLandmark.LEFT_SHOULDER, :2] = (0.4, shoulder_y)
+        lm[PoseLandmark.RIGHT_SHOULDER, :2] = (0.6, shoulder_y)
+        lm[PoseLandmark.LEFT_HIP, :2] = (0.42, 0.7)
+        lm[PoseLandmark.RIGHT_HIP, :2] = (0.58, 0.7)
+        return PoseFrame(t=t, landmarks=lm, image_size=(640, 480))
+
+    # Aquece a base R7 (15 frames em repouso, ombros em y=0.3).
+    for i in range(16):
+        res = pipe.step(_pose(i * 0.03, 0.3), i * 0.03)
+    assert res.normalized is not None
+    assert res.normalized.shoulder_px > 0.0
+
+    # Degrau abrupto nos ombros: EMA (alpha=0.2) suaviza o filtrado enquanto raw reflete o salto.
+    step_res = pipe.step(_pose(16 * 0.03, 0.45), 16 * 0.03)
+    assert len(step_res.gestures) == 1
+    tele = step_res.gestures[0]
+    assert tele.name == "crouch"
+    assert tele.raw_value is not None
+    assert tele.filtered_value is not None
+    assert tele.raw_value > tele.filtered_value

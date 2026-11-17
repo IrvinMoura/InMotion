@@ -75,7 +75,7 @@ def test_supported_keys() -> None:
     keys = KeyboardMouseBackend(api=FakeDirectInput()).supported_keys()
 
     assert keys == frozenset(
-        {"space", "shift", "ctrl", "w", "mouse_left", "mouse_right", "mouse_middle"}
+        {"space", "shift", "ctrl", "w", "a", "s", "d", "mouse_left", "mouse_right", "mouse_middle"}
     )
 
 

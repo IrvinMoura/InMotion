@@ -21,10 +21,22 @@ def test_only_gestures_in_the_profile_exist() -> None:
 
 
 def test_gesture_names_of_the_body_set() -> None:
-    """Spec 018: `walk` e `sprint` são a marcha; o inclinar chama `lean` (sem binding)."""
-    assert {"attack", "use", "jump", "crouch", "walk", "sprint", "lean"} == BODY_GESTURE_NAMES
-    names = [g.name for g in build_body_gestures({"lean", "sprint", "walk"})]
-    assert sorted(names) == ["lean", "sprint", "walk"]
+    """Spec 018/019: ``walk``, ``sprint``, ``lean``, ``walk_back`` e ``strafe_*``."""
+    expected = {
+        "attack",
+        "use",
+        "jump",
+        "crouch",
+        "walk",
+        "sprint",
+        "lean",
+        "walk_back",
+        "strafe_left",
+        "strafe_right",
+    }
+    assert expected == BODY_GESTURE_NAMES
+    names = [g.name for g in build_body_gestures({"lean", "sprint", "walk", "walk_back"})]
+    assert sorted(names) == ["lean", "sprint", "walk", "walk_back"]
 
 
 def test_arbiter_groups_only_when_members_exist() -> None:

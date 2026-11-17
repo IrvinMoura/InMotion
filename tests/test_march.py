@@ -292,8 +292,8 @@ def test_dropped_frame_does_not_count_the_same_lift_twice() -> None:
 
 
 def test_step_rearm_default_and_validation() -> None:
-    assert MarchParams().step_rearm == pytest.approx(0.25)
+    assert MarchParams().step_rearm == pytest.approx(0.22)
     with pytest.raises(ValueError, match="step_rearm"):
-        MarchParams(step_rearm=0.5)  # acima do θ_on do passo (0,30)
+        MarchParams(step_rearm=0.5)  # acima do θ_on do passo (0,22)
     with pytest.raises(ValueError, match="step_rearm"):
         MarchParams(step_rearm=0.0)

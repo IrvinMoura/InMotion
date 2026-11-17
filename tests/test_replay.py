@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 
 from inmotion.app import DEFAULT_PROFILE
+from inmotion.config.schema import AppConfig, FilterConfig
 from inmotion.fps import FpsMeter
 from inmotion.input.backend import MOUSE_BUTTONS, InputBackend
 from inmotion.pipeline import Pipeline, StepResult
@@ -24,7 +26,14 @@ from tools.replay import build_pipeline, main
 SIZE = (640, 480)
 DT = 1 / 30
 # A fixture tem ~1,2 s, mais que a persistência padrão (min_track_s = 1 s) só no fim: desligada.
-build = partial(build_pipeline, config=SafetyConfig(min_track_s=0.0))
+build = partial(
+    build_pipeline,
+    app_config=replace(
+        AppConfig(),
+        safety=SafetyConfig(min_track_s=0.0),
+        filters=FilterConfig(kind="none"),
+    ),
+)
 
 
 def body(y: float) -> PoseFrame:
@@ -93,7 +102,8 @@ def test_replay_is_deterministic() -> None:
     assert first.inputs == second.inputs
     assert first == second
     assert any(kind == "press" for _, kind, _ in first.inputs)
-    assert first.events == ()
+    assert first.events
+    assert first.events == second.events
 
 
 def test_replay_matches_live_pipeline() -> None:
@@ -263,9 +273,12 @@ def test_crouch_once_per_squat(name: str) -> None:
 
 @pytest.mark.parametrize("name", CROUCH_FIXTURES)
 def test_forward_lean_does_not_crouch(name: str) -> None:
-    """CA7: inclinar não aperta nada; a agachadinha antes do pulo não vira `shift`."""
+    """CA7 (017) + Spec 019: inclinar não agacha (``shift``), mas aciona ré (``s``)."""
     rec, presses = _replay_like_app(name)
-    assert _presses_in(rec, "lean", presses) == []
+    lean_keys = _presses_in(rec, "lean", presses)
+    assert "shift" not in lean_keys
+    assert set(lean_keys) == {"s"}
+    assert len(lean_keys) >= 2
     assert _presses_in(rec, "rest", presses) == []
     assert _presses_in(rec, "jump", presses) == ["space", "space", "space"]
 
@@ -388,13 +401,10 @@ def test_head_look_drift_during_gestures(name: str) -> None:
 # mesmas sessões da T0 com olhar para cima, centro, olhar para baixo, centro.
 PITCH_FIXTURES = ("look_pitch_2m.npz", "look_pitch_1m5.npz")
 # Limitações conhecidas do pitch (replay de 12/11/2026), fora da checagem de deriva:
-# - `lean`: inclinar o tronco para frente baixa o nariz em relação aos ombros (+163 a +207
-#   graus nas fixtures do agachar); o Minecraft não usa o gesto hoje, revisitar na spec 019;
 # - `jump` de `march_2m` (−50 graus) e `rest_mid2` de `march_2m_dropped` (+38 graus): a cabeça
 #   sobe/desce logo depois da marcha; nas 18 sessões com pulo a mediana é 0.
+# Na spec 019, `lean` foi resolvido pela supressão de pitch na inclinação do tronco.
 PITCH_KNOWN = {
-    ("crouch_2m.npz", "lean"),
-    ("crouch_1m5.npz", "lean"),
     ("march_2m.npz", "jump"),
     ("march_2m_dropped.npz", "rest_mid2"),
 }

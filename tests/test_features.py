@@ -19,7 +19,12 @@ from inmotion.gestures.features import (
     forward_reach,
     jump_height,
     knee_lift,
+    lean_back,
+    lean_back_rel,
+    lean_direction_2d,
     lean_forward,
+    lean_left,
+    lean_right,
 )
 from inmotion.types import PoseFrame
 from inmotion.vision.geometry import GeometryConfig
@@ -187,6 +192,72 @@ def test_lean_forward_recovers_synthetic_lean(lean: float) -> None:
 def test_lean_forward_none_cases() -> None:
     assert lean_forward(make_body(with_world=False), GEOMETRY) is None
     assert lean_forward(make_body(visibility=0.0), GEOMETRY) is None
+    assert lean_back(make_body(with_world=False), GEOMETRY) is None
+    assert lean_left(make_body(visibility=0.0), GEOMETRY) is None
+    assert lean_right(make_body(scale=0.05), GEOMETRY) is None
+
+
+@given(lean=st.floats(min_value=-1.2, max_value=0.6))
+def test_lean_back_recovers_synthetic_lean(lean: float) -> None:
+    """Spec 019: inclinar para trás é simétrico a ``lean_forward``."""
+    assert lean_back(make_body(lean=lean), GEOMETRY) == pytest.approx(-lean, abs=1e-9)
+
+
+@given(
+    lat=st.floats(min_value=-0.8, max_value=0.8),
+    scale=st.floats(min_value=0.5, max_value=2.0),
+    dx=st.floats(min_value=150.0, max_value=450.0),
+    dy=st.floats(min_value=180.0, max_value=360.0),
+)
+def test_lateral_lean_scale_and_translation_invariant(
+    lat: float, scale: float, dx: float, dy: float
+) -> None:
+    """Spec 019: ``lean_left``/``lean_right`` recuperam ``±lateral_lean`` (escala/posição)."""
+    pose = make_body(scale=scale, hip_x_px=dx, hip_y_px=dy, lateral_lean=lat, with_world=False)
+    left = lean_left(pose, GEOMETRY)
+    right = lean_right(pose, GEOMETRY)
+    assert left == pytest.approx(lat, abs=1e-6)
+    assert right == pytest.approx(-lat, abs=1e-6)
+
+
+def test_lean_back_rel_compensates_resting_bias() -> None:
+    """Spec 019: inclinação sagital (frente ou trás) medida em relação à base R7."""
+    hip = BodyBaseline(BaselineParams(init_frames=2))
+    lean_base = BodyBaseline(BaselineParams(init_frames=2))
+    for i in range(2):
+        pose = make_body(t=i / 30.0, lean=0.30)
+        build_context(pose, pose.t, GEOMETRY, hip, resting=True, lean_baseline=lean_base)
+    back_pose = make_body(t=2 / 30.0, lean=0.12)
+    ctx_back = build_context(
+        back_pose, back_pose.t, GEOMETRY, hip, resting=False, lean_baseline=lean_base
+    )
+    assert lean_back_rel(ctx_back, GEOMETRY) == pytest.approx(0.18, abs=1e-6)
+    fwd_pose = make_body(t=3 / 30.0, lean=0.55)
+    ctx_fwd = build_context(
+        fwd_pose, fwd_pose.t, GEOMETRY, hip, resting=False, lean_baseline=lean_base
+    )
+    assert lean_back_rel(ctx_fwd, GEOMETRY) == pytest.approx(0.25, abs=1e-6)
+
+
+def test_lean_direction_2d_distinguishes_front_and_back() -> None:
+    """Spec 019: razão olhos/boca até eixo dos ombros é > 0 à frente e < 0 atrás."""
+    base = make_body()
+    w, h = base.image_size
+
+    def _with_face_pts(eye_y: float, mouth_y: float) -> PoseFrame:
+        lm = np.array(base.landmarks, copy=True)
+        for idx in (PoseLandmark.LEFT_EYE, PoseLandmark.RIGHT_EYE):
+            lm[idx, 1] = eye_y / h
+        for idx in (PoseLandmark.MOUTH_LEFT, PoseLandmark.MOUTH_RIGHT):
+            lm[idx, 1] = mouth_y / h
+        return PoseFrame(t=0.0, image_size=(w, h), landmarks=lm, world=base.world)
+
+    front = lean_direction_2d(_with_face_pts(eye_y=115.0, mouth_y=135.0), GEOMETRY)
+    back = lean_direction_2d(_with_face_pts(eye_y=85.0, mouth_y=100.0), GEOMETRY)
+    assert front is not None
+    assert back is not None
+    assert front > 0.0
+    assert back < 0.0
 
 
 # --- Spec 017: crouch_drop (agachar pelos ombros) ---------------------------------------------

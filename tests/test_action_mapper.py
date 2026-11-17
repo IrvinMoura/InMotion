@@ -141,3 +141,44 @@ def test_punch_survives_pause_resume() -> None:
     step(1)
     assert left()[-1] == ("press", "mouse_left")  # re-apertado após N frames
     assert left().count(("press", "mouse_left")) == 2
+
+
+def test_shared_key_remains_pressed_until_all_holds_end() -> None:
+    fake = FakeInputBackend()
+    profile = GameProfile(
+        "shared",
+        {
+            "walk": Binding("w", GestureKind.HOLD),
+            "lean": Binding("w", GestureKind.HOLD),
+        },
+    )
+    mapper = ActionMapper(profile, TrackedInput(fake), MapperParams())
+    mapper.handle([ev("walk", EventKind.START, 0.0), ev("lean", EventKind.START, 0.0)], 0.0)
+    mapper.handle([ev("walk", EventKind.END, 0.1)], 0.1)
+    assert fake.pressed == {"w"}
+    mapper.handle([ev("lean", EventKind.END, 0.2)], 0.2)
+    assert fake.events == [("press", "w"), ("release", "w")]
+
+
+@pytest.mark.parametrize("tap_first", [True, False])
+def test_shared_hold_and_tap_do_not_release_each_other(tap_first: bool) -> None:
+    fake = FakeInputBackend()
+    profile = GameProfile(
+        "shared",
+        {
+            "walk": Binding("space", GestureKind.HOLD),
+            "jump": Binding("space", GestureKind.TRIGGER),
+        },
+    )
+    mapper = ActionMapper(profile, TrackedInput(fake), MapperParams())
+    mapper.handle([ev("walk", EventKind.START, 0.0), ev("jump", EventKind.PULSE, 0.0)], 0.0)
+    if tap_first:
+        mapper.update(0.1)
+        assert fake.pressed == {"space"}
+        mapper.handle([ev("walk", EventKind.END, 0.2)], 0.2)
+    else:
+        mapper.handle([ev("walk", EventKind.END, 0.02)], 0.02)
+        assert fake.pressed == {"space"}
+        mapper.update(0.1)
+    assert fake.pressed == set()
+    assert fake.events == [("press", "space"), ("release", "space")]
