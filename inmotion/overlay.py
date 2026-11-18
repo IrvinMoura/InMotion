@@ -6,17 +6,30 @@ testes legados (elementos avançados só desenham quando presentes no ``StepResu
 
 from __future__ import annotations
 
+from enum import Enum
+
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from inmotion.exit_zone import ExitZoneState
 from inmotion.gestures.base import GestureState
+from inmotion.history import SeriesView
 from inmotion.pipeline import GestureTelemetry, StepResult
 from inmotion.safety import SafetyState
 from inmotion.types import PoseFrame
 from inmotion.vision.geometry import NormalizedSkeleton
 from inmotion.vision.landmarks import PoseLandmark
+
+
+class OverlayLevel(Enum):
+    """Nível de detalhe (spec 009 RF1): ``off`` só a imagem, ``minimal`` o essencial e ``full``
+    tudo."""
+
+    OFF = "off"
+    MINIMAL = "minimal"
+    FULL = "full"
+
 
 # Hershey só desenha ASCII: sem acentos nos textos do overlay.
 _STATE_TEXT = {
@@ -255,8 +268,13 @@ def render(
     handedness: str | None = None,
     *,
     mirror: bool = False,
+    level: OverlayLevel = OverlayLevel.FULL,
+    plot: SeriesView | None = None,
+    plot_name: str | None = None,
 ) -> NDArray[np.uint8]:
     """Desenha pose, esqueleto, zona de saída, normalização M=S*R*T e telemetria no frame."""
+    if level is not OverlayLevel.FULL or plot is not None:
+        raise NotImplementedError
     out: NDArray[np.uint8] = np.array(img, dtype=np.uint8, copy=True)
 
     if result.pose is not None:

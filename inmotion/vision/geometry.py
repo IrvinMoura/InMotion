@@ -56,6 +56,15 @@ def mirror_matrix(width: float) -> Matrix3:
     return np.array([[-1.0, 0.0, width], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
 
 
+def inset_matrix(center: tuple[float, float], side: float, extent: float) -> Matrix3:
+    """Afim do miniquadro: ``A = T(c)·S(k)``, ``k = side / (2·extent)`` (spec 009 RF4).
+
+    Leva o quadrado ``[−extent, extent]²`` do espaço normalizado à caixa de lado ``side``
+    centrada em ``c`` (pixels).
+    """
+    raise NotImplementedError
+
+
 def apply_h(m: Matrix3, points: Points2) -> Points2:
     """Aplica ``m`` em coordenadas homogêneas e volta para 2D (divide por w)."""
     if m.shape != (3, 3):

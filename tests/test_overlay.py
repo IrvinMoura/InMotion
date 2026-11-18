@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from inmotion.history import SeriesView
 from inmotion.overlay import handedness_label, render
 from inmotion.pipeline import StepResult
 from inmotion.safety import SafetyState
@@ -178,3 +179,91 @@ def test_skeleton_bones_and_debug_panels_rendered() -> None:
     # Painel M=S*R*T no canto inferior direito e painel de telemetria no inferior esquerdo.
     assert out[320:472, 488:632].any()
     assert out[420:472, 8:378].any()
+
+
+# ---------------------------------------------------------------------------
+# Spec 009 (revisão de 18/11): níveis, gráfico e pureza (CA1, CA2)
+# ---------------------------------------------------------------------------
+
+NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 009 T1")
+FULL_SIZE = (640, 480)
+
+
+def full_result() -> StepResult:
+    """Pessoa inteira de frente, esqueleto normalizado e dois gestos na telemetria."""
+    from inmotion.gestures.base import GestureKind, GestureState
+    from inmotion.pipeline import GestureTelemetry
+    from inmotion.vision.geometry import GeometryConfig, normalize_skeleton
+    from tests.helpers import make_body, with_face
+
+    pose = with_face(make_body(t=1.0))
+    skel = normalize_skeleton(pose, GeometryConfig())
+    tele = tuple(
+        GestureTelemetry(name, GestureKind.TRIGGER, GestureState.IDLE, 0.5, 0.4, 0.8, 0.6)
+        for name in ("attack", "jump")
+    )
+    return StepResult(
+        t=1.0,
+        fps=30.0,
+        safety_state=SafetyState.ACTIVE,
+        pose=pose,
+        normalized=skel,
+        gestures=tele,
+        pressed=frozenset({"w"}),
+    )
+
+
+def series() -> SeriesView:
+    t = np.linspace(0.0, 1.0, 31)
+    return SeriesView(
+        t=t, raw=np.sin(6 * t), filtered=np.sin(6 * t - 0.3), theta_on=0.8, theta_off=0.6
+    )
+
+
+def camera_image() -> np.ndarray:
+    rng = np.random.default_rng(9)
+    return rng.integers(0, 256, (FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+
+
+@NOT_YET
+def test_render_twice_is_identical() -> None:
+    """O1: mesmo resultado e mesma vista → mesma imagem; nada de entrada muda."""
+    img = camera_image()
+    before = img.copy()
+    res, view = full_result(), series()
+    raw_before = view.raw.copy()
+    first = render(img, res, "right", mirror=True, plot=view, plot_name="attack")
+    second = render(img, res, "right", mirror=True, plot=view, plot_name="attack")
+    assert np.array_equal(first, second)
+    assert np.array_equal(img, before)
+    assert np.array_equal(view.raw, raw_before)
+
+
+@NOT_YET
+@pytest.mark.parametrize("mirror", [False, True])
+def test_off_level_returns_the_camera_image(mirror: bool) -> None:
+    from inmotion.overlay import OverlayLevel
+
+    img = camera_image()
+    out = render(img, full_result(), "right", mirror=mirror, level=OverlayLevel.OFF)
+    assert out is not img
+    assert np.array_equal(out, img[:, ::-1] if mirror else img)
+
+
+@NOT_YET
+def test_levels_change_output() -> None:
+    """CA2: o ``minimal`` tira os painéis (miniquadro e tabela), mas mantém o esqueleto."""
+    from inmotion.overlay import OverlayLevel
+
+    img = np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+    res = full_result()
+    full = render(img, res, "right", level=OverlayLevel.FULL)
+    minimal = render(img, res, "right", level=OverlayLevel.MINIMAL)
+    inset = (slice(320, 472), slice(488, 632))
+    table = (slice(420, 472), slice(8, 378))
+    assert full[inset].any()
+    assert full[table].any()
+    assert not minimal[inset].any()
+    assert not minimal[table].any()
+    assert np.array_equal(minimal[150, 320], full[150, 320])  # osso entre os ombros
+    assert minimal[150, 320].any()

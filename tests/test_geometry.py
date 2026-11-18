@@ -20,6 +20,7 @@ from inmotion.vision.geometry import (
     arm_extension,
     distance,
     from_pixels,
+    inset_matrix,
     is_visible,
     joint_angle,
     mirror_matrix,
@@ -414,3 +415,33 @@ def test_geometry_frame_under_1ms() -> None:
         frame()
     mean_ms = (time.perf_counter() - start) / n * 1000.0
     assert mean_ms < 1.0, f"geometria por frame: {mean_ms:.3f} ms"
+
+
+# ---------------------------------------------------------------------------
+# Spec 009 RF4: afim do miniquadro A = T(c)·S(k) (CA3)
+# ---------------------------------------------------------------------------
+
+NOT_YET_009 = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 009 T1")
+
+
+@NOT_YET_009
+def test_inset_matrix_maps_corners() -> None:
+    a = inset_matrix(center=(500.0, 300.0), side=120.0, extent=2.0)
+    corners = np.array([[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0], [0.0, 0.0]])
+    expected = np.array([[440, 240], [560, 240], [560, 360], [440, 360], [500, 300]], float)
+    assert np.allclose(apply_h(a, corners), expected)
+
+
+@NOT_YET_009
+def test_inset_matrix_is_translation_times_scale() -> None:
+    a = inset_matrix(center=(10.0, 20.0), side=8.0, extent=2.0)
+    assert np.allclose(a, translation_matrix(10.0, 20.0) @ scale_matrix(2.0))
+
+
+@NOT_YET_009
+@pytest.mark.parametrize(
+    ("side", "extent"), [(0.0, 2.0), (-1.0, 2.0), (10.0, 0.0), (math.nan, 2.0), (10.0, math.inf)]
+)
+def test_inset_matrix_rejects_invalid_box(side: float, extent: float) -> None:
+    with pytest.raises(ValueError, match=r"side|extent"):
+        inset_matrix(center=(0.0, 0.0), side=side, extent=extent)
