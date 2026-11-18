@@ -3,7 +3,7 @@
 
 [project]
 name = "inmotion"
-version = "0.0.0"
+version = "0.3.0"
 description = "Controle de jogos por visão computacional com uma webcam (Projeto A3)."
 requires-python = ">=3.10,<3.11"  # Ambiente validado; veja CONTRIBUTING.md.
 
