@@ -34,6 +34,7 @@ desktop.ini
 profiles/
 recordings/
 logs/
+reports/
 
 # --- Modelos MediaPipe (.task são baixados, não versionados) ---
 models/*.task
