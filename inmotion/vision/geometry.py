@@ -62,7 +62,11 @@ def inset_matrix(center: tuple[float, float], side: float, extent: float) -> Mat
     Leva o quadrado ``[−extent, extent]²`` do espaço normalizado à caixa de lado ``side``
     centrada em ``c`` (pixels).
     """
-    raise NotImplementedError
+    if not (math.isfinite(side) and side > 0):
+        raise ValueError(f"side deve ser finito e > 0, recebido {side}")
+    if not (math.isfinite(extent) and extent > 0):
+        raise ValueError(f"extent deve ser finito e > 0, recebido {extent}")
+    return translation_matrix(center[0], center[1]) @ scale_matrix(side / (2.0 * extent))
 
 
 def apply_h(m: Matrix3, points: Points2) -> Points2:

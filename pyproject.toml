@@ -97,6 +97,7 @@ module = [
     "inmotion.types",
     "inmotion.ports",
     "inmotion.pipeline",
+    "inmotion.history",
     "inmotion.session",
     "inmotion.watchdog",
     "inmotion.vision.landmarks",

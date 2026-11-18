@@ -421,10 +421,7 @@ def test_geometry_frame_under_1ms() -> None:
 # Spec 009 RF4: afim do miniquadro A = T(c)·S(k) (CA3)
 # ---------------------------------------------------------------------------
 
-NOT_YET_009 = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 009 T1")
 
-
-@NOT_YET_009
 def test_inset_matrix_maps_corners() -> None:
     a = inset_matrix(center=(500.0, 300.0), side=120.0, extent=2.0)
     corners = np.array([[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0], [0.0, 0.0]])
@@ -432,13 +429,11 @@ def test_inset_matrix_maps_corners() -> None:
     assert np.allclose(apply_h(a, corners), expected)
 
 
-@NOT_YET_009
 def test_inset_matrix_is_translation_times_scale() -> None:
     a = inset_matrix(center=(10.0, 20.0), side=8.0, extent=2.0)
     assert np.allclose(a, translation_matrix(10.0, 20.0) @ scale_matrix(2.0))
 
 
-@NOT_YET_009
 @pytest.mark.parametrize(
     ("side", "extent"), [(0.0, 2.0), (-1.0, 2.0), (10.0, 0.0), (math.nan, 2.0), (10.0, math.inf)]
 )

@@ -11,8 +11,6 @@ from inmotion.gestures.base import GestureKind, GestureState
 from inmotion.history import SignalHistory
 from inmotion.pipeline import GestureTelemetry
 
-NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 009 T1")
-
 
 def tele(
     name: str = "attack",
@@ -32,7 +30,6 @@ def tele(
     )
 
 
-@NOT_YET
 def test_window_drops_old_samples() -> None:
     hist = SignalHistory(window_s=3.0)
     for i in range(9):  # t = 0, 0.5, ..., 4.0
@@ -44,7 +41,6 @@ def test_window_drops_old_samples() -> None:
     assert list(view.raw) == [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
 
 
-@NOT_YET
 def test_records_raw_filtered_and_thresholds() -> None:
     hist = SignalHistory(window_s=3.0)
     hist.push(0.0, [tele(raw=0.5, filtered=0.4, theta_on=0.8, theta_off=0.6)])
@@ -56,7 +52,6 @@ def test_records_raw_filtered_and_thresholds() -> None:
     assert (view.theta_on, view.theta_off) == (0.9, 0.7)  # os limiares mais recentes
 
 
-@NOT_YET
 def test_missing_values_become_nan() -> None:
     hist = SignalHistory(window_s=3.0)
     hist.push(0.0, [tele(raw=None, filtered=None)])
@@ -66,7 +61,6 @@ def test_missing_values_become_nan() -> None:
     assert math.isnan(view.filtered[0])
 
 
-@NOT_YET
 def test_view_is_a_read_only_copy() -> None:
     hist = SignalHistory(window_s=3.0)
     hist.push(0.0, [tele()])
@@ -78,7 +72,6 @@ def test_view_is_a_read_only_copy() -> None:
     assert len(view.t) == 1  # a vista antiga não muda com o push
 
 
-@NOT_YET
 def test_names_follow_first_seen_order_and_unknown_is_none() -> None:
     hist = SignalHistory(window_s=3.0)
     hist.push(0.0, [tele("attack"), tele("jump")])
@@ -87,7 +80,6 @@ def test_names_follow_first_seen_order_and_unknown_is_none() -> None:
     assert hist.view("nope") is None
 
 
-@NOT_YET
 def test_gesture_not_seen_keeps_its_old_samples_until_they_expire() -> None:
     hist = SignalHistory(window_s=1.0)
     hist.push(0.0, [tele("jump")])
@@ -98,7 +90,6 @@ def test_gesture_not_seen_keeps_its_old_samples_until_they_expire() -> None:
     assert len(jump.t) == 0  # expirou pelo tempo do último push
 
 
-@NOT_YET
 def test_clear_empties_everything() -> None:
     hist = SignalHistory(window_s=3.0)
     hist.push(0.0, [tele()])
@@ -107,14 +98,12 @@ def test_clear_empties_everything() -> None:
     assert hist.view("attack") is None
 
 
-@NOT_YET
 @pytest.mark.parametrize("window", [0.0, -1.0, math.inf, math.nan])
 def test_rejects_invalid_window(window: float) -> None:
     with pytest.raises(ValueError, match="window_s"):
         SignalHistory(window_s=window)
 
 
-@NOT_YET
 def test_time_going_backwards_restarts_the_window() -> None:
     """Replay recomeçado ou relógio novo: amostras do "futuro" não ficam no gráfico."""
     hist = SignalHistory(window_s=3.0)
