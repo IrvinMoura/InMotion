@@ -29,6 +29,7 @@ class SeriesView:
     filtered: NDArray[np.float64]
     theta_on: float
     theta_off: float
+    window_s: float
 
 
 @dataclass
@@ -92,6 +93,7 @@ class SignalHistory:
             filtered=_read_only(table[:, 2]),
             theta_on=series.theta_on,
             theta_off=series.theta_off,
+            window_s=self._window_s,
         )
 
     def names(self) -> tuple[str, ...]:

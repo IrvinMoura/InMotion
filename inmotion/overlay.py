@@ -101,6 +101,14 @@ _ANGLE_COLOR = (255, 120, 255)
 _ANGLE_RADIUS = 18
 _ANGLE_TEXT_SCALE = 0.45
 _ANGLE_TEXT_OFFSET = 22
+_PLOT_W, _PLOT_H = 260, 122
+_PLOT_MARGIN = 8
+_PLOT_PAD = (8, 22, 8, 16)  # esquerda, topo (título), direita, base (legenda)
+_PLOT_RAW_COLOR = (150, 150, 150)
+_PLOT_FILTERED_COLOR = (80, 230, 120)
+_PLOT_ON_COLOR = (0, 80, 255)
+_PLOT_OFF_COLOR = (0, 220, 220)
+_PLOT_SPAN_PAD = 0.1  # folga vertical, fração da faixa de valores
 _ARMS: tuple[tuple[int, int, int], ...] = (
     (PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_ELBOW, PoseLandmark.LEFT_WRIST),
     (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST),
@@ -308,6 +316,71 @@ def _draw_elbow_angles(out: NDArray[np.uint8], pose: PoseFrame, *, mirror: bool)
         cv2.putText(out, text, (tx, ty), _FONT, _ANGLE_TEXT_SCALE, _ANGLE_COLOR, 1, cv2.LINE_AA)
 
 
+def _segments(xs: NDArray[np.float64], ys: NDArray[np.float64]) -> list[NDArray[np.int32]]:
+    """Trechos contínuos (sem NaN) da linha, já em pixels inteiros para o ``polylines``."""
+    finite = np.isfinite(ys)
+    pieces: list[NDArray[np.int32]] = []
+    start = None
+    for i, ok in enumerate([*finite.tolist(), False]):
+        if ok and start is None:
+            start = i
+        elif not ok and start is not None:
+            if i - start >= 2:
+                pts = np.stack([xs[start:i], ys[start:i]], axis=1)
+                pieces.append(np.round(pts).astype(np.int32).reshape(-1, 1, 2))
+            start = None
+    return pieces
+
+
+def _draw_plot(out: NDArray[np.uint8], view: SeriesView, name: str | None) -> None:
+    """RF2: bruto × filtrado nos últimos ``H = window_s`` segundos, com ``θ_on`` e ``θ_off``.
+
+    ``x = x0 + (t − (t_n − H))/H·w`` e ``y = y0 + h·(1 − (f − f_min)/(f_max − f_min))``,
+    com ``t_n`` o último instante e a faixa ``[f_min, f_max]`` cobrindo valores e limiares.
+    """
+    height, width = out.shape[:2]
+    if width < 420 or height < 240:
+        return
+    x0 = width - _PLOT_W - _PLOT_MARGIN
+    y0 = _PLOT_MARGIN
+    _blend_rect(out, x0, y0, x0 + _PLOT_W, y0 + _PLOT_H, (18, 20, 24))
+    title = f"{name or '?'}: bruto x filtrado ({view.window_s:.0f}s)"
+    cv2.putText(out, title, (x0 + 6, y0 + 15), _FONT, 0.40, (220, 230, 240), 1, cv2.LINE_AA)
+    left, top, right, bottom = _PLOT_PAD
+    gx0, gy0 = x0 + left, y0 + top
+    gw, gh = _PLOT_W - left - right, _PLOT_H - top - bottom
+    legend_y = y0 + _PLOT_H - 4
+    for i, (label, color) in enumerate(
+        (
+            ("bruto", _PLOT_RAW_COLOR),
+            ("filtrado", _PLOT_FILTERED_COLOR),
+            ("on", _PLOT_ON_COLOR),
+            ("off", _PLOT_OFF_COLOR),
+        )
+    ):
+        cv2.putText(out, label, (x0 + 6 + i * 62, legend_y), _FONT, 0.36, color, 1, cv2.LINE_AA)
+
+    values = np.concatenate([view.raw, view.filtered, [view.theta_on, view.theta_off]])
+    values = values[np.isfinite(values)]
+    lo, hi = float(values.min()), float(values.max())
+    pad = max(hi - lo, 1e-6) * _PLOT_SPAN_PAD
+    lo, hi = lo - pad, hi + pad
+
+    def to_y(v: NDArray[np.float64]) -> NDArray[np.float64]:
+        return gy0 + gh * (1.0 - (v - lo) / (hi - lo))
+
+    for theta, color in ((view.theta_on, _PLOT_ON_COLOR), (view.theta_off, _PLOT_OFF_COLOR)):
+        ty = round(float(to_y(np.array(theta))))
+        cv2.line(out, (gx0, ty), (gx0 + gw, ty), color, 1)
+    if view.t.size == 0:
+        return
+    t_end = float(view.t[-1])
+    xs = gx0 + (view.t - (t_end - view.window_s)) / view.window_s * gw
+    for series, color in ((view.raw, _PLOT_RAW_COLOR), (view.filtered, _PLOT_FILTERED_COLOR)):
+        for piece in _segments(xs, to_y(series)):
+            cv2.polylines(out, [piece], False, color, 1, cv2.LINE_AA)
+
+
 def handedness_label(handedness: str) -> str:
     """Texto do modo (spec 017 RF6): "Destro"/"Canhoto" e o braço que ataca (ASCII, Hershey)."""
     return _HAND_TEXT[handedness]
@@ -329,8 +402,6 @@ def render(
     modo e zona de saída. ``full``: também ângulos (A7), miniquadro ``M = S·R·T``, tabela
     de gestos e, com ``plot``, o gráfico no tempo do gesto ``plot_name``.
     """
-    if plot is not None:
-        raise NotImplementedError
     out: NDArray[np.uint8] = np.array(img, dtype=np.uint8, copy=True)
     if level is OverlayLevel.OFF:
         return np.ascontiguousarray(cv2.flip(out, 1)) if mirror else out
@@ -357,4 +428,6 @@ def render(
     if result.normalized is not None:
         _draw_normalized_skeleton(out, result.normalized)
     _draw_telemetry_panel(out, result.gestures, result.pressed, result.look)
+    if plot is not None:
+        _draw_plot(out, plot, plot_name)
     return out

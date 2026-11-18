@@ -185,7 +185,6 @@ def test_skeleton_bones_and_debug_panels_rendered() -> None:
 # Spec 009 (revisão de 18/11): níveis, gráfico e pureza (CA1, CA2)
 # ---------------------------------------------------------------------------
 
-NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 009 T1")
 FULL_SIZE = (640, 480)
 
 
@@ -216,7 +215,12 @@ def full_result() -> StepResult:
 def series() -> SeriesView:
     t = np.linspace(0.0, 1.0, 31)
     return SeriesView(
-        t=t, raw=np.sin(6 * t), filtered=np.sin(6 * t - 0.3), theta_on=0.8, theta_off=0.6
+        t=t,
+        raw=np.sin(6 * t),
+        filtered=np.sin(6 * t - 0.3),
+        theta_on=0.8,
+        theta_off=0.6,
+        window_s=1.0,
     )
 
 
@@ -225,7 +229,6 @@ def camera_image() -> np.ndarray:
     return rng.integers(0, 256, (FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
 
 
-@NOT_YET
 def test_render_twice_is_identical() -> None:
     """O1: mesmo resultado e mesma vista → mesma imagem; nada de entrada muda."""
     img = camera_image()
@@ -283,3 +286,41 @@ def test_full_draws_elbow_angles_and_minimal_does_not() -> None:
         y = round(float(res.pose.landmarks[elbow, 1]) * h)
         near = (slice(y - 40, y + 40), slice(x - 40, x + 40))
         assert not np.array_equal(full[near], minimal[near])
+
+
+PLOT_BOX = (slice(8, 130), slice(372, 632))  # canto superior direito em 640×480
+
+
+def test_plot_drawn_only_with_view() -> None:
+    """RF2: o gráfico aparece no ``full`` com uma vista; sem ela ou no ``minimal``, não."""
+    from inmotion.overlay import OverlayLevel
+
+    img = np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+    res = full_result()
+    with_plot = render(img, res, plot=series(), plot_name="attack")
+    without = render(img, res)
+    minimal = render(img, res, level=OverlayLevel.MINIMAL, plot=series(), plot_name="attack")
+    assert with_plot[PLOT_BOX].any()
+    assert not without[PLOT_BOX].any()
+    assert not minimal[PLOT_BOX].any()
+
+
+def test_plot_survives_gaps_and_short_series() -> None:
+    """NaN (frames sem valor) interrompe a linha; série curta ou vazia não quebra."""
+    from inmotion.history import SeriesView
+
+    img = np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+    t = np.linspace(0.0, 1.0, 10)
+    raw = np.where(np.arange(10) % 3 == 0, np.nan, t)
+    gappy = SeriesView(t=t, raw=raw, filtered=raw, theta_on=0.8, theta_off=0.6, window_s=3.0)
+    empty = SeriesView(
+        t=np.empty(0),
+        raw=np.empty(0),
+        filtered=np.empty(0),
+        theta_on=0.8,
+        theta_off=0.6,
+        window_s=3.0,
+    )
+    for view in (gappy, empty):
+        out = render(img, full_result(), plot=view, plot_name="attack")
+        assert out.shape == img.shape
