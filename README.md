@@ -178,6 +178,7 @@ Para outro jogo, copie `config/games/minecraft.yaml`, ajuste `bindings` e `arbit
 | `guided`         | Sessão guiada em tela grande (**não envia input**); grava `.npz` e `.json` | `python -m tools.guided --person p1 --distance 2.0 --script full`       |
 | `record`         | Grava landmarks rotulados por teclas (`1` soco D, `2` soco E, `3` pulo, `4` agachar, `5` inclinar) | `python -m tools.record --person p1 --lighting clara --out data/p1.npz` |
 | `replay`         | Reproduz uma gravação pelo mesmo pipeline do app                         | `python -m tools.replay --recording sessao.npz`                           |
+| `traceability`   | Tabela fórmula (A1–A9, R1–R7) → arquivo e função, para o relatório | `python -m tools.traceability --out reports/rastreabilidade.md` |
 | `evaluate`       | Métricas por gesto (precisão, recall, FP/min), matriz de confusão e filtros | `python -m tools.evaluate --recordings "recordings/guided_*.npz"`      |
 
 Roteiros do `guided`: `full`, `crouch`, `march` e `look`. O `evaluate` reconhece o roteiro de cada gravação e grava `metrics.md`, CSVs e gráficos em `reports/evaluate/`. Em `record`, `--lighting` aceita `clara`, `escura` ou `outra`. `F9` encerra e salva o que já foi gravado.
@@ -203,7 +204,7 @@ InMotion/
 │   ├── overlay.py / history.py → Janela de debug e histórico do gráfico
 │   ├── metrics.py          → Métricas por gesto (sessões guiadas)
 │   └── recording.py / recorder.py / replay.py → Gravação e replay
-├── tools/                  → check_env, download_model, bench_pose, guided, record, replay, evaluate, simulate
+├── tools/                  → check_env, download_model, bench_pose, guided, record, replay, evaluate, traceability, simulate
 ├── tests/                  → Testes e fixtures de sessões .npz
 ├── pyproject.toml          → Ruff, pytest e mypy
 ├── requirements.txt        → Dependências de runtime (versões fixas)
