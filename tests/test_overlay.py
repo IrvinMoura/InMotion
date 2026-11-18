@@ -324,3 +324,21 @@ def test_plot_survives_gaps_and_short_series() -> None:
     for view in (gappy, empty):
         out = render(img, full_result(), plot=view, plot_name="attack")
         assert out.shape == img.shape
+
+
+@pytest.mark.slow
+def test_render_under_3ms() -> None:
+    """CA7 (RNF1): ``full`` com espelho, ângulos, miniquadro, tabela e gráfico < 3 ms."""
+    import time
+
+    img = camera_image()
+    res, view = full_result(), series()
+    for _ in range(20):  # aquece caches
+        render(img, res, "right", mirror=True, plot=view, plot_name="attack")
+    n = 200
+    t0 = time.perf_counter()
+    for _ in range(n):
+        render(img, res, "right", mirror=True, plot=view, plot_name="attack")
+    mean_ms = (time.perf_counter() - t0) / n * 1000.0
+    print(f"overlay full: {mean_ms:.2f} ms/frame")
+    assert mean_ms < 3.0

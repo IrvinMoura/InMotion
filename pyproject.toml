@@ -40,6 +40,7 @@ allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "�
 "cv2".msg = "Núcleo puro: cv2 só em adaptadores (CONTRIBUTING.md)."
 "mediapipe".msg = "Núcleo puro: mediapipe só no adaptador de pose (CONTRIBUTING.md)."
 "pydirectinput".msg = "Núcleo puro: pydirectinput só no backend de input (CONTRIBUTING.md)."
+"inmotion.overlay".msg = "Spec 009: só a composição desenha; o núcleo não importa o overlay."
 "vgamepad".msg = "Núcleo puro: vgamepad só no backend de gamepad (CONTRIBUTING.md)."
 "time.time".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
 "time.monotonic".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
