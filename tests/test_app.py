@@ -428,9 +428,7 @@ def test_display_window_is_resizable(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake = _FakeCv2()
     monkeypatch.setattr(app_module, "cv2", fake)
-    monkeypatch.setattr(
-        app_module, "render", lambda image, result, handedness, *, mirror=False: image
-    )
+    monkeypatch.setattr(app_module, "render", lambda image, result, handedness, **kwargs: image)
     display = app_module.OpenCvDisplay("teste")
     image = np.zeros((480, 640, 3), dtype=np.uint8)
     result = StepResult(t=0.0, fps=None, safety_state=SafetyState.ACTIVE, pose=None)
@@ -524,3 +522,98 @@ def test_watchdog_retries_transient_release_failure() -> None:
         timeout.cancel()
     assert backend.attempts == 2
     assert backend.pressed == set()
+
+
+class _KeyedCv2(_FakeCv2):
+    """``waitKey`` devolve as teclas roteirizadas, uma por frame."""
+
+    def __init__(self, keys: list[int]) -> None:
+        super().__init__()
+        self.keys = keys
+
+    def waitKey(self, delay: int) -> int:  # noqa: N802 - nome da API real
+        return self.keys.pop(0) if self.keys else -1
+
+
+def test_display_keys_change_level_plot_and_background(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Spec 009 CA5: ``o`` cicla o nível, ``Tab`` troca o gesto do gráfico, ``s`` o Sobel."""
+    import inmotion.app as app_module
+    from inmotion.gestures.base import GestureState
+    from inmotion.overlay import OverlayLevel
+    from inmotion.pipeline import GestureTelemetry, StepResult
+    from inmotion.safety import SafetyState
+
+    calls: list[dict[str, object]] = []
+
+    def spy_render(image: np.ndarray, result: object, handedness: object, **kw: object) -> object:
+        calls.append({"image": image, **kw})
+        return image
+
+    tab, none = 9, -1
+    fake = _KeyedCv2([ord("o"), tab, ord("s"), ord("o"), tab, ord("s"), ord("o"), none])
+    monkeypatch.setattr(app_module, "cv2", fake)
+    monkeypatch.setattr(app_module, "render", spy_render)
+    sobel_img = np.full((480, 640, 3), 5, dtype=np.uint8)
+    display = app_module.OpenCvDisplay("teste", sobel=lambda image: sobel_img)
+    tele = tuple(
+        GestureTelemetry(n, GestureKind.TRIGGER, GestureState.IDLE, 0.1, 0.1, 0.8, 0.6)
+        for n in ("attack", "jump", "crouch")
+    )
+    image = np.zeros((480, 640, 3), dtype=np.uint8)
+    for i in range(8):
+        result = StepResult(
+            t=i / 30, fps=None, safety_state=SafetyState.ACTIVE, pose=None, gestures=tele
+        )
+        display.show(image, result)
+
+    levels = [c["level"] for c in calls]
+    full, minimal, off = OverlayLevel.FULL, OverlayLevel.MINIMAL, OverlayLevel.OFF
+    assert levels == [full, minimal, minimal, minimal, off, off, off, full]
+    assert [c["plot_name"] for c in calls] == ["attack"] * 2 + ["jump"] * 3 + ["crouch"] * 3
+    sobel = [c["image"] is sobel_img for c in calls]
+    assert sobel == [False, False, False, True, True, True, False, False]
+    plot = calls[-1]["plot"]
+    assert plot is not None
+    assert len(plot.t) == 8  # o histórico acumulou os 8 frames
+
+
+def test_sobel_key_is_ignored_without_sobel(monkeypatch: pytest.MonkeyPatch) -> None:
+    import inmotion.app as app_module
+    from inmotion.pipeline import StepResult
+    from inmotion.safety import SafetyState
+
+    monkeypatch.setattr(app_module, "cv2", _KeyedCv2([ord("s")]))
+    monkeypatch.setattr(app_module, "render", lambda image, result, handedness, **kw: image)
+    display = app_module.OpenCvDisplay("teste", sobel_on=True)
+    result = StepResult(t=0.0, fps=None, safety_state=SafetyState.ACTIVE, pose=None)
+    display.show(np.zeros((48, 64, 3), dtype=np.uint8), result)
+    assert display.sobel_on is False
+
+
+class _ResultSpyDisplay(SpyDisplay):
+    def __init__(self) -> None:
+        super().__init__()
+        self.results: list[object] = []
+
+    def show(self, image: np.ndarray, result: object) -> bool:
+        self.results.append(result)
+        return super().show(image, result)
+
+
+def test_latency_reaches_display() -> None:
+    """Spec 009 CA6: latência = agora (fim do step) − horário da captura, em ms."""
+    clock = FakeClock()
+
+    class SlowEstimator(FakePoseEstimator):
+        def estimate(self, image_bgr: np.ndarray, t: float) -> PoseFrame | None:
+            clock.advance(0.02)  # 20 ms de inferência
+            return super().estimate(image_bgr, t)
+
+    display = _ResultSpyDisplay()
+    deps = make_deps(clock, ClockedSource(clock, 3), SlowEstimator([]), FakeInputBackend())
+    deps.display = display
+    run(deps, NO_PERSISTENCE, max_frames=3)
+    latencies = [r.latency_ms for r in display.results]  # type: ignore[attr-defined]
+    # A leitura avança DT e cada inferência soma 20 ms ao relógio, mas os quadros seguem
+    # em i·DT: a latência cresce 20 ms por frame (a fila atrasa, como numa câmera lenta).
+    assert latencies == pytest.approx([(DT + 0.02 * (i + 1)) * 1000.0 for i in range(3)])

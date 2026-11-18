@@ -415,6 +415,8 @@ def render(
         _draw_elbow_angles(out, result.pose, mirror=mirror)
 
     fps_text = "FPS: --" if result.fps is None else f"FPS: {result.fps:.1f}"
+    if result.latency_ms is not None:
+        fps_text += f"  lat: {result.latency_ms:.0f} ms"
     cv2.putText(out, fps_text, _TEXT_ORIGIN_FPS, _FONT, _TEXT_SCALE, (255, 255, 255), 1)
     if result.exit_zone is not None:
         _draw_exit_zone(out, result.exit_zone, mirror=mirror)

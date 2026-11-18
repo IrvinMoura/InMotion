@@ -123,10 +123,21 @@ class FilterConfig:
 @dataclass(frozen=True)
 class OverlayConfig:
     """Janela de debug: ``enabled=False`` equivale a ``--no-overlay`` (mais FPS); ``mirror``
-    espelha o quadro na tela (A4)."""
+    espelha o quadro na tela (A4).
+
+    Spec 009: ``level`` é o nível inicial (a tecla ``o`` alterna), ``plot_gesture`` o gesto
+    do gráfico (``Tab`` troca) e ``history_s`` a janela do gráfico em segundos.
+    """
 
     enabled: bool = True
     mirror: bool = True
+    level: Literal["off", "minimal", "full"] = "full"
+    plot_gesture: str = "attack"
+    history_s: float = 3.0
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.history_s) or self.history_s <= 0:
+            raise ValueError(f"history_s deve ser finito e > 0, recebido {self.history_s}")
 
 
 @dataclass(frozen=True)

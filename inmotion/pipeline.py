@@ -76,6 +76,7 @@ class StepResult:
     pressed: frozenset[str] = frozenset()
     normalized: NormalizedSkeleton | None = None
     gestures: tuple[GestureTelemetry, ...] = ()
+    latency_ms: float | None = None  # spec 009: captura → fim do step (input já enviado)
 
 
 class Pipeline:

@@ -216,3 +216,17 @@ def test_arbiter_error_names_the_file_that_defined_it(tmp_path: Path) -> None:
         load_config(default_path=default, game="teste", games_dir=games)
     assert exc.value.path == "arbiter.priority"
     assert str(game) in str(exc.value)
+
+
+def test_overlay_keys_from_spec_009(tmp_path: Path) -> None:
+    """Spec 009: nível, gesto do gráfico e janela do histórico vêm da config e são validados."""
+    default = write(tmp_path / "default.yaml", "{}")
+    cfg, _ = load_config(
+        default,
+        overrides=["overlay.level=minimal", "overlay.plot_gesture=jump", "overlay.history_s=5"],
+    )
+    assert (cfg.overlay.level, cfg.overlay.plot_gesture) == ("minimal", "jump")
+    assert cfg.overlay.history_s == 5.0
+    for bad in ("overlay.level=huge", "overlay.history_s=0"):
+        with pytest.raises(ConfigError, match="overlay"):
+            load_config(default, overrides=[bad])

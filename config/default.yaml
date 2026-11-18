@@ -163,6 +163,9 @@ exit_zone:
 overlay:
   enabled: true           # false = sem janela de debug (mais FPS)
   mirror: true            # A4: espelhamento horizontal na exibicao
+  level: full             # off | minimal | full (tecla o alterna; spec 009)
+  plot_gesture: attack    # gesto do grafico bruto x filtrado (Tab troca)
+  history_s: 3.0          # janela do grafico, segundos
 
 logging:
   level: INFO             # DEBUG | INFO | WARNING | ERROR
