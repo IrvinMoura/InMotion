@@ -12,7 +12,7 @@ import pytest
 from inmotion.metrics import StepExpectation
 from inmotion.recording import LabelInterval
 from tests.test_recording import make_recording
-from tools.evaluate import detect_script, expectations, main
+from tools.evaluate import detect_script, expectations, main, sidecar_handedness
 from tools.guided import GuidedStep, crouch_steps, default_steps
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sessions"
@@ -73,7 +73,7 @@ def test_report_and_plots_created(tmp_path: Path) -> None:
     assert main(["--recordings", str(tmp_path / "*.npz"), "--out", str(out)]) == 0
     report = (out / "metrics.md").read_text(encoding="utf-8")
     assert "| crouch |" in report
-    assert "crouch_2m | crouch | 2 m" in report
+    assert "crouch_2m | crouch | destro | 2 m" in report
     assert "tremor parado" in report  # o recorte tem o passo "rest"
     assert (out / "metrics.csv").read_text(encoding="utf-8").startswith("session,")
     assert (out / "filters.csv").exists()
@@ -83,3 +83,27 @@ def test_report_and_plots_created(tmp_path: Path) -> None:
 
 def test_main_without_recordings_returns_one(tmp_path: Path) -> None:
     assert main(["--recordings", str(tmp_path / "*.npz"), "--out", str(tmp_path)]) == 1
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("3 SOCOS - BRACO ESQUERDO", "left"),
+        ("3 SOCOS DIREITO, OLHANDO A TELA", "right"),
+        ("3 SOCOS", None),
+    ],
+)
+def test_sidecar_handedness_from_dominant_punch_title(
+    tmp_path: Path, title: str, expected: str | None
+) -> None:
+    """O placar do ``tools.guided`` diz o braço do soco dominante: canhoto ou destro."""
+    import json
+
+    rec = tmp_path / "s.npz"
+    steps = [
+        {"label": "punch_other", "title": "3 SOCOS - BRACO DIREITO"},
+        {"label": "punch_dominant", "title": title},
+    ]
+    rec.with_suffix(".json").write_text(json.dumps({"steps": steps}), encoding="utf-8")
+    assert sidecar_handedness(rec) == expected
+    assert sidecar_handedness(tmp_path / "sem_json.npz") is None

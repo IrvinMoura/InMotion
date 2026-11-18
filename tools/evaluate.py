@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
+import json
 import logging
 import math
 from collections import defaultdict
@@ -72,6 +73,7 @@ class SessionResult:
     name: str
     script: str
     distance_m: float | None
+    handedness: str
     metrics: Mapping[str, GestureMetrics]
     confusion: Mapping[tuple[str, str], int]
     fps: float | None
@@ -121,6 +123,24 @@ def detect_script(recording: Recording, handedness: str) -> str | None:
     return None
 
 
+def sidecar_handedness(path: Path) -> str | None:
+    """Lateralidade da sessão pelo JSON do ``tools.guided`` ao lado do ``.npz``.
+
+    O placar guarda o título de cada passo; o do soco dominante diz o braço ("BRACO
+    ESQUERDO" = canhoto). ``None`` sem JSON ou sem esse passo.
+    """
+    sidecar = path.with_suffix(".json")
+    if not sidecar.exists():
+        return None
+    steps = json.loads(sidecar.read_text(encoding="utf-8")).get("steps", [])
+    title = next((s.get("title", "") for s in steps if s.get("label") == "punch_dominant"), "")
+    if "ESQUERDO" in title:
+        return "left"
+    if "DIREITO" in title:
+        return "right"
+    return None
+
+
 def fps_of(recording: Recording) -> float | None:
     """FPS da gravação: ``1 / mediana(Δt)``."""
     if recording.t.size < 2:
@@ -141,6 +161,9 @@ def evaluate_session(
 ) -> tuple[Recording, SessionResult] | None:
     """Replay de uma gravação guiada e as métricas dela; ``None`` sem roteiro reconhecido."""
     recording = load_recording(path)
+    handedness = sidecar_handedness(path)
+    if handedness is not None and handedness != config.handedness:
+        config = replace(config, handedness=handedness)  # type: ignore[arg-type]
     name = script or detect_script(recording, config.handedness)
     if name is None:
         logger.warning("%s: rótulos não casam com nenhum roteiro; pulada", path.name)
@@ -151,6 +174,7 @@ def evaluate_session(
     return recording, SessionResult(
         name=path.stem,
         script=name,
+        handedness=config.handedness,
         distance_m=recording.meta.distance_m,
         metrics=score_guided(recording.labels, exp, presses),
         confusion=confusion_counts(recording.labels, exp, presses),
@@ -303,11 +327,12 @@ def write_reports(
         lines += _md_table(HEADER, metrics_rows(merge([s.metrics for s in group])))
     lines += ["", "## Sessões", ""]
     lines += _md_table(
-        ["gravação", "roteiro", "distância", "FPS"],
+        ["gravação", "roteiro", "mão", "distância", "FPS"],
         [
             [
                 s.name,
                 s.script,
+                "canhoto" if s.handedness == "left" else "destro",
                 _num(s.distance_m, "{:g} m"),
                 _num(s.fps, "{:.1f}") + _ok(None if s.fps is None else s.fps >= TARGET_FPS),
             ]
@@ -427,7 +452,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 continue
             recording, session = done
             sessions.append(session)
-            found, wrist = compare_filters(recording, session.name, config)
+            session_config = replace(config, handedness=session.handedness)  # type: ignore[arg-type]
+            found, wrist = compare_filters(recording, session.name, session_config)
             if any(f.jitter_px is not None or f.lag_ms is not None for f in found):
                 filters += found
                 series[session.name] = wrist
