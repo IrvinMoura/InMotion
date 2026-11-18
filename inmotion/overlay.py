@@ -6,6 +6,7 @@ testes legados (elementos avançados só desenham quando presentes no ``StepResu
 
 from __future__ import annotations
 
+import math
 from enum import Enum
 
 import cv2
@@ -18,7 +19,13 @@ from inmotion.history import SeriesView
 from inmotion.pipeline import GestureTelemetry, StepResult
 from inmotion.safety import SafetyState
 from inmotion.types import PoseFrame
-from inmotion.vision.geometry import NormalizedSkeleton
+from inmotion.vision.geometry import (
+    NormalizedSkeleton,
+    apply_h,
+    inset_matrix,
+    joint_angle,
+    mirror_matrix,
+)
 from inmotion.vision.landmarks import PoseLandmark
 
 
@@ -89,6 +96,15 @@ _ZONE_THICKNESS = 2
 _ZONE_TEXT_SCALE = 0.45
 _ZONE_TEXT_PAD = (4, 16)
 _ZONE_LABEL = "SAIR ({:.0f}s)"
+_INSET_EXTENT = 2.0  # o miniquadro mostra [−2, 2]² em larguras de ombro
+_ANGLE_COLOR = (255, 120, 255)
+_ANGLE_RADIUS = 18
+_ANGLE_TEXT_SCALE = 0.45
+_ANGLE_TEXT_OFFSET = 22
+_ARMS: tuple[tuple[int, int, int], ...] = (
+    (PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_ELBOW, PoseLandmark.LEFT_WRIST),
+    (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST),
+)
 
 
 def _blend_rect(
@@ -175,19 +191,19 @@ def _draw_normalized_skeleton(out: NDArray[np.uint8], skel: NormalizedSkeleton) 
         cv2.LINE_AA,
     )
     inner_h = max(40, box_h - 40)
-    scale = min((box_w - 18) / 2.6, inner_h / 3.8)
     cx = bx0 + box_w // 2
     cy = by0 + 20 + round(inner_h * 0.48)
     cv2.line(out, (bx0 + 6, cy), (bx1 - 6, cy), (55, 60, 70), 1)
     cv2.line(out, (cx, by0 + 20), (cx, by1 - 18), (55, 60, 70), 1)
 
+    # p_inset = A·n_norm, A = T(c)·S(k) leva [−e, e]² à caixa (RF4).
+    side = float(min(box_w - 18, inner_h))
+    pixels = apply_h(inset_matrix((cx, cy), side, _INSET_EXTENT), skel.points[:, :2])
     pts: dict[int, tuple[int, int]] = {}
-    for idx in range(len(skel.points)):
-        nx, ny = float(skel.points[idx, 0]), float(skel.points[idx, 1])
-        if not (np.isfinite(nx) and np.isfinite(ny)):
+    for idx, (fx, fy) in enumerate(pixels):
+        if not (np.isfinite(fx) and np.isfinite(fy)):
             continue
-        px = round(cx + nx * scale)
-        py = round(cy + ny * scale)
+        px, py = round(float(fx)), round(float(fy))
         if bx0 + 2 <= px < bx1 - 2 and by0 + 18 <= py < by1 - 16:
             pts[idx] = (px, py)
     for a, b in POSE_CONNECTIONS:
@@ -257,6 +273,41 @@ def _draw_telemetry_panel(
     cv2.putText(out, f"{keys_text}  {look_text}", (x0 + 6, y1 - 6), _FONT, 0.40, io_color, 1)
 
 
+def _draw_elbow_angles(out: NDArray[np.uint8], pose: PoseFrame, *, mirror: bool) -> None:
+    """A7: arco e valor (graus) do ângulo em cada cotovelo visível, já na imagem exibida.
+
+    Os pontos passam por A5 (pixels) e, com ``mirror``, por A4 com ``W − 1`` (a mesma
+    conta do ``cv2.flip``), para o texto ser desenhado depois do espelho e ficar legível.
+    """
+    height, width = out.shape[:2]
+    lm = pose.landmarks
+    for idx in _ARMS:
+        if not bool(np.all(lm[list(idx), 3] >= _BONE_MIN_VIS)):
+            continue
+        pts = lm[list(idx), :2] * np.array([width, height], dtype=np.float64)
+        if mirror:
+            pts = apply_h(mirror_matrix(width - 1), pts)
+        if not np.isfinite(pts).all():
+            continue
+        shoulder, elbow, wrist = pts
+        try:
+            theta = joint_angle(shoulder, elbow, wrist)
+        except ValueError:
+            continue
+        a_u = math.degrees(math.atan2(*(shoulder - elbow)[::-1]))
+        a_v = math.degrees(math.atan2(*(wrist - elbow)[::-1]))
+        sweep = (a_v - a_u + 540.0) % 360.0 - 180.0  # o arco curto, de u para v
+        center = (round(float(elbow[0])), round(float(elbow[1])))
+        start, end = sorted((a_u, a_u + sweep))
+        axes = (_ANGLE_RADIUS, _ANGLE_RADIUS)
+        cv2.ellipse(out, center, axes, 0.0, start, end, _ANGLE_COLOR, 2, cv2.LINE_AA)
+        bisector = math.radians(a_u + sweep / 2.0 + 180.0)  # texto do lado de fora do arco
+        tx = center[0] + round(_ANGLE_TEXT_OFFSET * math.cos(bisector)) - 10
+        ty = center[1] + round(_ANGLE_TEXT_OFFSET * math.sin(bisector)) + 4
+        text = f"{math.degrees(theta):.0f}"
+        cv2.putText(out, text, (tx, ty), _FONT, _ANGLE_TEXT_SCALE, _ANGLE_COLOR, 1, cv2.LINE_AA)
+
+
 def handedness_label(handedness: str) -> str:
     """Texto do modo (spec 017 RF6): "Destro"/"Canhoto" e o braço que ataca (ASCII, Hershey)."""
     return _HAND_TEXT[handedness]
@@ -272,15 +323,25 @@ def render(
     plot: SeriesView | None = None,
     plot_name: str | None = None,
 ) -> NDArray[np.uint8]:
-    """Desenha pose, esqueleto, zona de saída, normalização M=S*R*T e telemetria no frame."""
-    if level is not OverlayLevel.FULL or plot is not None:
+    """Desenha o overlay no nível ``level`` sobre uma cópia de ``img`` (O1: função pura).
+
+    ``off``: só a imagem (espelhada, se ``mirror``). ``minimal``: esqueleto, FPS, estado,
+    modo e zona de saída. ``full``: também ângulos (A7), miniquadro ``M = S·R·T``, tabela
+    de gestos e, com ``plot``, o gráfico no tempo do gesto ``plot_name``.
+    """
+    if plot is not None:
         raise NotImplementedError
     out: NDArray[np.uint8] = np.array(img, dtype=np.uint8, copy=True)
+    if level is OverlayLevel.OFF:
+        return np.ascontiguousarray(cv2.flip(out, 1)) if mirror else out
 
     if result.pose is not None:
         _draw_pose_skeleton(out, result.pose)
     if mirror:
         out = np.ascontiguousarray(cv2.flip(out, 1))
+    full = level is OverlayLevel.FULL
+    if full and result.pose is not None:
+        _draw_elbow_angles(out, result.pose, mirror=mirror)
 
     fps_text = "FPS: --" if result.fps is None else f"FPS: {result.fps:.1f}"
     cv2.putText(out, fps_text, _TEXT_ORIGIN_FPS, _FONT, _TEXT_SCALE, (255, 255, 255), 1)
@@ -291,6 +352,8 @@ def render(
     if handedness is not None:
         text = handedness_label(handedness)
         cv2.putText(out, text, _TEXT_ORIGIN_HAND, _FONT, _HAND_TEXT_SCALE, _HAND_COLOR, 1)
+    if not full:
+        return out
     if result.normalized is not None:
         _draw_normalized_skeleton(out, result.normalized)
     _draw_telemetry_panel(out, result.gestures, result.pressed, result.look)

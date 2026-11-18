@@ -239,7 +239,6 @@ def test_render_twice_is_identical() -> None:
     assert np.array_equal(view.raw, raw_before)
 
 
-@NOT_YET
 @pytest.mark.parametrize("mirror", [False, True])
 def test_off_level_returns_the_camera_image(mirror: bool) -> None:
     from inmotion.overlay import OverlayLevel
@@ -250,7 +249,6 @@ def test_off_level_returns_the_camera_image(mirror: bool) -> None:
     assert np.array_equal(out, img[:, ::-1] if mirror else img)
 
 
-@NOT_YET
 def test_levels_change_output() -> None:
     """CA2: o ``minimal`` tira os painéis (miniquadro e tabela), mas mantém o esqueleto."""
     from inmotion.overlay import OverlayLevel
@@ -267,3 +265,21 @@ def test_levels_change_output() -> None:
     assert not minimal[table].any()
     assert np.array_equal(minimal[150, 320], full[150, 320])  # osso entre os ombros
     assert minimal[150, 320].any()
+
+
+def test_full_draws_elbow_angles_and_minimal_does_not() -> None:
+    """RF3 (A7): arco e graus perto de cada cotovelo só no ``full``."""
+    from inmotion.overlay import OverlayLevel
+    from inmotion.vision.landmarks import PoseLandmark
+
+    img = np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+    res = full_result()
+    assert res.pose is not None
+    full = render(img, res, level=OverlayLevel.FULL)
+    minimal = render(img, res, level=OverlayLevel.MINIMAL)
+    w, h = FULL_SIZE
+    for elbow in (PoseLandmark.LEFT_ELBOW, PoseLandmark.RIGHT_ELBOW):
+        x = round(float(res.pose.landmarks[elbow, 0]) * w)
+        y = round(float(res.pose.landmarks[elbow, 1]) * h)
+        near = (slice(y - 40, y + 40), slice(x - 40, x + 40))
+        assert not np.array_equal(full[near], minimal[near])
