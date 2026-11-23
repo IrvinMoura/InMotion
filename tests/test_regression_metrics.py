@@ -7,6 +7,9 @@ Fixtures (pessoa p1, 1,5 m e 2 m), todas recortes de ``recordings/guided_p1_*``:
 - ``crouch_*``: parado, 3 pulos, 3 agachamentos, 3 inclinações sem tecla;
 - ``march_*``: parado, marcha lenta, marcha rápida, pausas, 3 pulos.
 
+As ``punch_*`` vêm de sessões que já davam 3/3: estes testes detectam piora, não provam a
+meta (a medida de qualidade é o ``tools.evaluate`` sobre todas as gravações).
+
 Os passos "parado" (e inclinar, que não aperta nada) são o trecho negativo do FP/min.
 """
 

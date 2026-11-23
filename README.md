@@ -236,7 +236,7 @@ pytest -m "not hardware and not slow"  # testes, como no CI
 ```
 
 - `hardware`: precisa de webcam e/ou input real no Windows; fica de fora por padrão (`-m hardware`)
-- `slow`: testes demorados; rodam por padrão (pule com `-m "not slow"`)
+- `slow`: testes demorados; rodam por padrão (pule com `-m "not slow and not hardware"`; só `-m "not slow"` substitui o filtro padrão e roda os testes de hardware)
 - Núcleo puro: sem `cv2`, `mediapipe`, `pydirectinput` ou `time.*` (o tempo entra como `t`)
 - Sem `print` no app: use `logging`
 - Limiares só mudam com base em gravações, nunca "no olho"
