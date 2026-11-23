@@ -110,10 +110,18 @@ class TrackedInput:
 
     def press(self, key: KeyName) -> None:
         with self._lock:
-            if not self._enabled or key in self._pressed:
-                return
-            # Uma falha pode ocorrer depois de o backend enviar o comando.
-            # Registrar antes garante uma tentativa de soltura no guard().
+            if self._enabled:
+                self._press(key)
+
+    def press_menu_key(self, key: KeyName) -> None:
+        """Envia a tecla autorizada pelo SafetyManager com o input de gestos bloqueado."""
+        with self._lock:
+            self._enabled = False
+            self._press(key)
+
+    def _press(self, key: KeyName) -> None:
+        if key not in self._pressed:
+            # Uma falha pode ocorrer depois do envio. O guard() tentará soltar a tecla.
             self._pressed.add(key)
             self._backend.press(key)
 
@@ -173,6 +181,9 @@ class SafetyManager:
         self._last_ok_t: float | None = None
         self._lost = False
         self._paused = False
+        self._menu: str | None = None
+        self._menu_tap: tuple[KeyName, float] | None = None
+        self._tracking_ok = False
         self._previous_keys: frozenset[KeyName] = frozenset()
         self._generation = 0
         self._stall_generation = 0
@@ -185,7 +196,11 @@ class SafetyManager:
         with self._lock:
             if self._paused:
                 return SafetyState.PAUSED
-            return SafetyState.LOST if self._lost else SafetyState.ACTIVE
+            if self._lost:
+                return SafetyState.LOST
+            if self._menu is not None or self._menu_tap is not None:
+                return SafetyState.PAUSED
+            return SafetyState.ACTIVE
 
     @property
     def config(self) -> SafetyConfig:
@@ -226,6 +241,11 @@ class SafetyManager:
             if self._last_t is not None and t <= self._last_t:
                 raise ValueError(f"t deve ser estritamente crescente: {t} <= {self._last_t}")
             self._last_t = t
+            self._tracking_ok = tracking_ok
+            if self._menu_tap is not None and t >= self._menu_tap[1]:
+                self._tracked.release(self._menu_tap[0])
+                self._menu_tap = None
+                self._sync_enabled()
 
             if tracking_ok:
                 self._last_ok_t = t
@@ -245,6 +265,7 @@ class SafetyManager:
     def on_stall(self) -> None:
         """Loop travado (watchdog): solta tudo e desabilita até o próximo ``on_frame``."""
         with self._lock:
+            self._tracking_ok = False
             self._lost = True
             self._generation += 1
             self._stall_generation += 1
@@ -262,17 +283,45 @@ class SafetyManager:
             self._previous_keys = keys
 
             if self._config.pause_key in rising:
-                self._paused = not self._paused
-                self._sync_enabled()
-                if self._paused:
-                    self._generation += 1
-                    self._tracked.release_all()
+                if not self._paused:
+                    # Permite fechar o menu à mão enquanto o controlador está pausado.
+                    self._menu = None
+                self.set_paused(not self._paused)
 
             return SafetyAction.EXIT if self._config.exit_key in rising else SafetyAction.NONE
 
+    def set_paused(self, paused: bool) -> None:
+        """F8 e voz compartilham a pausa do controlador."""
+        with self._lock:
+            if paused != self._paused:
+                self._paused = paused
+                self._sync_enabled()
+                if paused:
+                    self._generation += 1
+                    self._tracked.release_all()
+
+    @property
+    def menu(self) -> str | None:
+        with self._lock:
+            return self._menu
+
+    def change_menu(self, menu: str | None, key: KeyName, t: float, hold_s: float) -> None:
+        """Abre apenas durante o jogo e fecha apenas um menu aberto por voz."""
+        with self._lock:
+            if self._paused or self._lost or not self._tracking_ok or self._menu_tap is not None:
+                return
+            if (menu is None) == (self._menu is None):
+                return
+            self._generation += 1
+            self._menu = menu
+            self._menu_tap = (key, t + hold_s)
+            self._sync_enabled()
+            self._tracked.release_all()
+            self._tracked.press_menu_key(key)
+
     def _sync_enabled(self) -> None:
         """Input só é aceito em ACTIVE: nem pausado (S5), nem sem pose."""
-        self._tracked.set_enabled(not (self._paused or self._lost))
+        self._tracked.set_enabled(self.state is SafetyState.ACTIVE)
 
     @contextmanager
     def guard(self) -> Iterator["SafetyManager"]:

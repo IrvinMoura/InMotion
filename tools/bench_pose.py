@@ -1,14 +1,10 @@
-"""Mede o FPS do laço câmera -> PoseLandmarker para cada variante (spec 003 T7, CA7).
+"""Compara FPS, tempo de inferência e taxa de detecção das variantes do modelo de pose.
 
 Uso::
 
     python -m tools.bench_pose --seconds 10
 
-Fique em pé na frente da câmera durante a medição. Imprime uma tabela Markdown
-(variante, frames, FPS, inferência média e p95, taxa de detecção) para colar na spec.
-
-Ferramenta de composição: monta os adaptadores reais; a medição testável fica em
-``bench_variant``, que recebe os ports por injeção.
+Fique em pé diante da câmera durante a medição.
 """
 
 from __future__ import annotations
@@ -39,7 +35,7 @@ _P95_QUANTILES = 20
 
 @dataclass(frozen=True)
 class BenchResult:
-    """Resultado de uma variante. FPS = frames processados / tempo de parede."""
+    """O FPS considera o tempo de captura e inferência após o aquecimento."""
 
     variant: str
     frames: int
@@ -49,7 +45,6 @@ class BenchResult:
     detection_rate: float
 
     def row(self) -> str:
-        """Linha da tabela Markdown."""
         return (
             f"| {self.variant} | {self.frames} | {self.fps:.1f} | {self.infer_mean_ms:.1f} | "
             f"{self.infer_p95_ms:.1f} | {self.detection_rate:.0%} |"
@@ -58,7 +53,7 @@ class BenchResult:
 
 TABLE_HEADER = (
     "| Variante | Frames | FPS | Inferência média (ms) | Inferência p95 (ms) | Detecção |\n"
-    "|---|---|---|---|---|---|"
+    "|----------|--------|-----|-----------------------|---------------------|----------|"
 )
 
 

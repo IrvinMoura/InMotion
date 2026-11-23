@@ -272,13 +272,11 @@ def test_crouch_once_per_squat(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", CROUCH_FIXTURES)
-def test_forward_lean_does_not_crouch(name: str) -> None:
-    """CA7 (017) + Spec 019: inclinar não agacha (``shift``), mas aciona ré (``s``)."""
+def test_forward_lean_does_not_crouch_or_reverse(name: str) -> None:
+    """Nas duas distâncias gravadas, a inclinação para frente mantém as teclas soltas."""
     rec, presses = _replay_like_app(name)
     lean_keys = _presses_in(rec, "lean", presses)
-    assert "shift" not in lean_keys
-    assert set(lean_keys) == {"s"}
-    assert len(lean_keys) >= 2
+    assert not lean_keys
     assert _presses_in(rec, "rest", presses) == []
     assert _presses_in(rec, "jump", presses) == ["space", "space", "space"]
 

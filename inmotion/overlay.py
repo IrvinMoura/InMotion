@@ -273,6 +273,8 @@ def render(
     if handedness is not None:
         text = handedness_label(handedness)
         cv2.putText(out, text, _TEXT_ORIGIN_HAND, _FONT, _HAND_TEXT_SCALE, _HAND_COLOR, 1)
+    if result.voice_status is not None:
+        cv2.putText(out, f"Voz: {result.voice_status}", (8, 84), _FONT, 0.5, (255, 255, 255), 1)
     if result.normalized is not None:
         _draw_normalized_skeleton(out, result.normalized)
     _draw_telemetry_panel(out, result.gestures, result.pressed, result.look)

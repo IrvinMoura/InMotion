@@ -1,8 +1,4 @@
-"""Composição do aplicativo: liga câmera, pose, pipeline, segurança e exibição.
-
-Camada de composição: pode importar tudo. A lógica por frame mora no ``Pipeline`` (núcleo);
-aqui ficam o loop, a thread do watchdog e o ``OpenCvDisplay``.
-"""
+"""Executa a sessão ao vivo e monitora o tempo entre quadros com o watchdog."""
 
 from __future__ import annotations
 
@@ -31,6 +27,7 @@ from inmotion.safety import (
     register_atexit,
 )
 from inmotion.session import DEFAULT_PROFILE, create_pipeline, pose_filter_from_config
+from inmotion.voice import VoiceSource
 from inmotion.watchdog import Watchdog
 
 _log = logging.getLogger(__name__)
@@ -62,6 +59,7 @@ class AppDeps:
     exit_zone: ExitZoneConfig | None = field(default_factory=ExitZoneConfig)
     # Pré-processamento antes da pose (spec 005, A2: blur gaussiano); None = imagem crua.
     preprocess: Callable[[NDArray[np.uint8]], NDArray[np.uint8]] | None = None
+    voice: VoiceSource | None = None
 
 
 class OpenCvDisplay:
@@ -118,7 +116,9 @@ def _watch(
                 _log.exception("on_stall() falhou")
 
 
-def _close_quietly(name: str, obj: FrameSource | PoseEstimator | Display | None) -> None:
+def _close_quietly(
+    name: str, obj: FrameSource | PoseEstimator | Display | VoiceSource | None
+) -> None:
     if obj is None:
         return
     try:
@@ -141,7 +141,13 @@ def _run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = No
     tracked = TrackedInput(deps.backend, safety_config.always_release)
     safety = SafetyManager(tracked, safety_config)
     config = deps.config
-    pipeline = create_pipeline(safety, config, deps.profile, deps.pose_filter)
+    pipeline = create_pipeline(
+        safety,
+        config,
+        deps.profile,
+        deps.pose_filter,
+        config.voice if deps.voice is not None else None,
+    )
     watchdog = Watchdog(safety_config.watchdog_timeout_s)
     exit_zone = ExitZone(deps.exit_zone) if deps.exit_zone is not None else None
     register_atexit(safety)
@@ -163,7 +169,8 @@ def _run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = No
                 frames += 1
                 t = deps.clock.now()
                 watchdog.beat(t)
-                if safety.on_hotkeys(deps.hotkeys.poll()) is SafetyAction.EXIT:
+                keys = deps.hotkeys.poll()
+                if safety.on_hotkeys(keys) is SafetyAction.EXIT:
                     _log.info("Saída solicitada (%s)", safety_config.exit_key)
                     break
                 packet = deps.source.read(READ_TIMEOUT_S)
@@ -178,12 +185,15 @@ def _run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = No
                 if packet is not None and t - packet.t > safety_config.lost_timeout_s:
                     pose = None
                 zone = exit_zone.update(pose, t) if exit_zone is not None else None
+                command = deps.voice.poll() if deps.voice is not None else None
+                if safety_config.pause_key in keys:
+                    command = None
                 if zone is not None and zone.inside:
                     if not zone_inside:
                         safety.on_stall()
                     result = replace(pipeline.step(None, t), pose=pose, exit_zone=zone)
                 else:
-                    result = replace(pipeline.step(pose, t), exit_zone=zone)
+                    result = replace(pipeline.step(pose, t, command), exit_zone=zone)
                 zone_inside = zone is not None and zone.inside
                 if (
                     deps.display is not None
@@ -210,6 +220,7 @@ def run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = Non
     try:
         return _run(deps, safety_config, max_frames)
     finally:
+        _close_quietly("microfone", deps.voice)
         _close_quietly("source", deps.source)
         _close_quietly("estimator", deps.estimator)
         _close_quietly("display", deps.display)

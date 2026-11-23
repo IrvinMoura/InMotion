@@ -439,19 +439,22 @@ def test_walk_back_and_strafe_gestures() -> None:
     right = strafe_gesture("strafe_right", Side.RIGHT, LEAN, GEOMETRY)
     rig = Rig([back, left, right])
 
-    for i in range(6):
-        rig.step(make_body(t=i * DT, lean=-0.5))
+    for i in range(16):
+        rig.step(make_body(t=i * DT, lean=-0.35))
+    assert rig.events == []  # repouso inicial com viés negativo também permite calibrar
+    for i in range(16, 22):
+        rig.step(make_body(t=i * DT, lean=-0.85))
     assert rig.kinds("walk_back") == [EventKind.START]
     assert rig.kinds("strafe_left") == []
     assert rig.kinds("strafe_right") == []
 
-    for i in range(6, 12):
+    for i in range(22, 28):
         rig.step(make_body(t=i * DT, lean=0.0, lateral_lean=0.5))
     assert rig.kinds("walk_back") == [EventKind.START, EventKind.END]
     assert rig.kinds("strafe_left") == [EventKind.START]
     assert rig.kinds("strafe_right") == []
 
-    for i in range(12, 18):
+    for i in range(28, 34):
         rig.step(make_body(t=i * DT, lean=0.0, lateral_lean=-0.5))
     assert rig.kinds("strafe_left") == [EventKind.START, EventKind.END]
     assert rig.kinds("strafe_right") == [EventKind.START]

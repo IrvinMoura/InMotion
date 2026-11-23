@@ -113,6 +113,39 @@ Há também uma zona de saída provisória: manter a mão no retângulo do canto
 
 O overlay de debug exibe o vídeo espelhado horizontalmente (`overlay.mirror: true`), esqueleto conectado, miniquadro do esqueleto normalizado ($M = S \cdot R \cdot T$), sinais brutos vs. filtrados com limiares (`theta_off`/`theta_on`), estado de cada gesto e inputs ativos.
 
+### Comandos de voz no Minecraft
+
+Com a janela do Minecraft em foco e o personagem no mundo, diga uma frase inteira e faça uma pausa curta. O Vosk processa o áudio no computador.
+
+| Frase | Efeito com as teclas padrão |
+|-------|-----------------------------|
+| **Jogo inventário** | Solta os controles de movimento e abre o inventário com `E`. |
+| **Jogo menu** | Abre o menu do jogo com `Esc`. |
+| **Jogo voltar** | Fecha o inventário ou menu aberto por voz com `Esc` e libera os gestos. |
+| **Controle pausar** | Suspende os gestos do InMotion e solta as entradas ativas. |
+| **Controle continuar** | Retoma o InMotion. Se houver um menu aberto, diga **jogo voltar**. |
+
+Para instalar a voz em outro computador, execute na raiz do projeto, no PowerShell. O download só é necessário na primeira instalação. [Modelo oficial de português do Vosk](https://alphacephei.com/vosk/models)
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-voice.txt
+New-Item -ItemType Directory -Force models | Out-Null
+curl.exe --fail --location https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip --output models/vosk-model-small-pt-0.3.zip
+Expand-Archive -LiteralPath models/vosk-model-small-pt-0.3.zip -DestinationPath models
+```
+
+Para iniciar com o microfone padrão do Windows, use
+
+```powershell
+.\.venv\Scripts\python.exe -m inmotion --game minecraft --voice
+```
+
+O overlay indica qual menu o InMotion abriu. Para testar, dê um passo até aparecer `W`, diga **jogo inventário** e confira se o personagem para. Diga **jogo voltar** e marche de novo. Repita com **jogo menu**. Com o inventário aberto, use o mouse físico para navegar.
+
+Se fechar a tela manualmente, aperte `F8` para pausar o controlador, volte ao mundo do jogo e aperte `F8` de novo. O InMotion acompanha os comandos enviados e não lê a tela do Minecraft.
+
+Para escolher outro microfone, liste os dispositivos com `python -m sounddevice` e acrescente, por exemplo, `--set voice.device=2`. As frases e as teclas ficam em `voice` no arquivo `config/default.yaml` e podem ser sobrescritas no perfil do usuário.
+
 ### Opções da Linha de Comando
 
 | Opção                  | Descrição                                                                  |
@@ -127,6 +160,7 @@ O overlay de debug exibe o vídeo espelhado horizontalmente (`overlay.mirror: tr
 | `--log-level`          | `DEBUG`, `INFO`, `WARNING` ou `ERROR`                                      |
 | `--log-file NOME`      | Grava o log também em `logs/NOME`                                          |
 | `--no-overlay`         | Não abre a janela de debug (mais FPS)                                      |
+| `--voice`              | Ativa o microfone e os comandos de voz offline                             |
 
 Código de saída `2` indica configuração ou ambiente inválido (perfil inválido, modelo ausente, câmera indisponível).
 

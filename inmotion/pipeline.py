@@ -32,6 +32,7 @@ from inmotion.vision.geometry import (
     normalize_skeleton,
 )
 from inmotion.vision.landmarks import PoseLandmark, Side
+from inmotion.voice import VoiceCommand, VoiceConfig, apply_command
 
 # Ombros e quadris: sem eles visíveis a pose é fantasma/parcial e não conta como tracking.
 TORSO: tuple[int, ...] = (
@@ -76,6 +77,7 @@ class StepResult:
     pressed: frozenset[str] = frozenset()
     normalized: NormalizedSkeleton | None = None
     gestures: tuple[GestureTelemetry, ...] = ()
+    voice_status: str | None = None
 
 
 class Pipeline:
@@ -101,6 +103,7 @@ class Pipeline:
         march_params: MarchParams | None = None,
         geometry: GeometryConfig | None = None,
         head_look: HeadLookParams | None = None,
+        voice: VoiceConfig | None = None,
     ) -> None:
         self._safety = safety
         self._gestures = tuple(gestures)
@@ -121,14 +124,18 @@ class Pipeline:
         self._arbiter, self._combo = build_arbiter(
             [g.name for g in self._gestures], profile.arbiter
         )
-        self._mapper = ActionMapper(profile, safety.input, mapper_params or MapperParams())
+        self._mapper_params = mapper_params or MapperParams()
+        self._mapper = ActionMapper(profile, safety.input, self._mapper_params)
+        self._voice = voice
         self._was_active = True  # gestos nascem zerados
         self._tracked_since: float | None = None  # início da sequência contínua de pose
         self._generation = safety.generation
         self._stall_generation = safety.stall_generation
         self._needs_reset = False
 
-    def step(self, pose: PoseFrame | None, t: float) -> StepResult:
+    def step(
+        self, pose: PoseFrame | None, t: float, command: VoiceCommand | None = None
+    ) -> StepResult:
         """on_frame → (se ACTIVE) gestos → árbitro → mapper → FPS.
 
         ``tracking_ok`` exige pose com o tronco visível (``min_torso_visibility`` em
@@ -171,6 +178,8 @@ class Pipeline:
             if t - self._tracked_since < config.min_track_s:
                 pose = None
         self._safety.on_frame(t, pose is not None)
+        if command is not None and self._voice is not None:
+            apply_command(command, self._voice, self._safety, t, self._mapper_params.tap_hold_s)
         state = self._safety.state
         active = state is SafetyState.ACTIVE
         if active and (not self._was_active or self._needs_reset):
@@ -212,6 +221,7 @@ class Pipeline:
             pressed=self._safety.input.pressed,
             normalized=normalized,
             gestures=gestures,
+            voice_status=(self._safety.menu or "ouvindo") if self._voice is not None else None,
         )
 
     def _crouch_in_progress(self) -> bool:

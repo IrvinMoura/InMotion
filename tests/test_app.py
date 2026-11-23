@@ -13,6 +13,7 @@ from inmotion.filters.pose_filter import PoseFilter
 from inmotion.gestures.base import Direction, GestureKind, GestureParams
 from inmotion.safety import SafetyConfig
 from inmotion.types import FramePacket, PoseFrame
+from inmotion.voice import VoiceCommand
 from tests.fakes import (
     FakeClock,
     FakeFrameSource,
@@ -98,6 +99,37 @@ def test_jump_script_produces_press_release() -> None:
     assert backend.pressed == set()
     assert source.closed
     assert estimator.closed
+
+
+def test_voice_menu_while_attacking_releases_then_rearms() -> None:
+    class ScriptedVoice:
+        closed = False
+        commands = iter(
+            [None] * 10
+            + [VoiceCommand.INVENTORY] * 5
+            + [VoiceCommand.MENU] * 4
+            + [VoiceCommand.BACK] * 5
+            + [None] * 10
+        )
+
+        def poll(self) -> VoiceCommand | None:
+            return next(self.commands)
+
+        def close(self) -> None:
+            self.closed = True
+
+    clock = FakeClock()
+    backend = FakeInputBackend()
+    deps = make_deps(clock, ClockedSource(clock, 34), FakePoseEstimator(PUNCH), backend)
+    voice = ScriptedVoice()
+    deps.voice = voice
+    assert run(deps, NO_PERSISTENCE, max_frames=34) == 0
+    presses = [key for event, key in backend.events if event == "press"]
+    assert presses == ["mouse_left", "e", "esc", "mouse_left"]
+    assert backend.events.index(("release", "mouse_left")) < backend.events.index(("press", "e"))
+    assert backend.events.index(("release", "e")) < backend.events.index(("press", "esc"))
+    assert backend.pressed == set()
+    assert voice.closed
 
 
 def test_f9_exits_and_releases_all() -> None:
