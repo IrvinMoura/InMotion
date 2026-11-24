@@ -13,6 +13,7 @@ from inmotion.gestures.features import (
     BaselineParams,
     BodyBaseline,
     FrameContext,
+    ScaleWatch,
     build_context,
     crouch_depth,
     crouch_drop,
@@ -458,3 +459,67 @@ def test_raised_knee_does_not_move_its_baseline() -> None:
         pose = make_body(t=i / 30, knee_lift_left=0.8)
         build_context(pose, i / 30, GEOMETRY, hip, True, None, baselines)
     assert baselines[0].value == before
+
+
+# --- Base R7 x distância: a largura dos ombros mudou de vez (24/11/2026) ---
+
+
+def _watch(**kwargs: float | None) -> ScaleWatch:
+    return ScaleWatch(BaselineParams(**{"scale_band": 0.5, "scale_hold_s": 3.0, **kwargs}))  # type: ignore[arg-type]
+
+
+def test_scale_watch_fires_once_after_sustained_change_in_both_directions() -> None:
+    for factor in (0.5, 2.0):  # |ln| = 0,69 >= 0,5
+        watch = _watch()
+        assert not watch.update(100.0, 0.0, has_base=True)
+        assert not watch.update(100.0 * factor, 1.0, has_base=True)
+        assert not watch.update(100.0 * factor, 3.9, has_base=True)
+        assert watch.update(100.0 * factor, 4.0, has_base=True)  # 3 s seguidos
+        watch.reset()
+        assert not watch.update(100.0 * factor, 4.1, has_base=True)  # nova referência
+        assert not watch.update(100.0 * factor, 9.0, has_base=True)
+
+
+def test_scale_watch_ignores_short_and_small_changes() -> None:
+    watch = _watch()
+    watch.update(100.0, 0.0, has_base=True)
+    for i in range(1, 100):  # 2,9 s fora da faixa, um frame de volta, e de novo
+        s = 100.0 if i % 30 == 0 else 50.0
+        assert not watch.update(s, i * 0.1, has_base=True)
+    watch = _watch()
+    watch.update(100.0, 0.0, has_base=True)
+    for i in range(1, 100):  # |ln 0,65| = 0,43 < 0,5: girar o tronco não conta
+        assert not watch.update(65.0, i * 0.1, has_base=True)
+
+
+def test_scale_watch_missing_scale_restarts_the_count() -> None:
+    watch = _watch()
+    watch.update(100.0, 0.0, has_base=True)
+    watch.update(50.0, 1.0, has_base=True)
+    for missing in (None, float("nan"), 0.0):
+        assert not watch.update(missing, 3.0, has_base=True)
+    assert not watch.update(50.0, 4.5, has_base=True)  # recomeça daqui
+    assert not watch.update(50.0, 7.4, has_base=True)
+    assert watch.update(50.0, 7.5, has_base=True)
+
+
+def test_scale_watch_reference_is_the_scale_when_the_base_appears() -> None:
+    watch = _watch()
+    assert not watch.update(300.0, 0.0, has_base=False)  # sem base não há referência
+    assert not watch.update(100.0, 1.0, has_base=True)
+    assert not watch.update(100.0, 9.0, has_base=True)
+    assert not watch.update(50.0, 10.0, has_base=True)
+    assert not watch.update(50.0, 12.0, has_base=False)  # a base sumiu: esquece tudo
+    assert not watch.update(50.0, 13.0, has_base=True)
+    assert not watch.update(50.0, 20.0, has_base=True)
+
+
+def test_scale_watch_can_be_disabled_and_validates() -> None:
+    watch = _watch(scale_band=None)
+    watch.update(100.0, 0.0, has_base=True)
+    assert not any(watch.update(10.0, float(t), has_base=True) for t in range(1, 60))
+    for bad in (0.0, -1.0, float("nan")):
+        with pytest.raises(ValueError, match="scale_band"):
+            BaselineParams(scale_band=bad)
+        with pytest.raises(ValueError, match="scale_hold_s"):
+            BaselineParams(scale_hold_s=bad)

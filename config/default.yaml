@@ -79,6 +79,13 @@ baseline:
   # agachar arrastava a base e, ao levantar, saía um pulo (3 de 9 agachamentos em
   # 01/11/2026); 0,15 = theta_off do pulo, acima do ruído parado (|j| <= 0,05).
   rest_band: 0.15
+  # Mudança de distância: |ln(s/s0)| >= scale_band (1,65x mais perto ou mais longe que na
+  # medição da base) por scale_hold_s segundos seguidos solta tudo e mede as bases de novo;
+  # scale_band: null desliga. 22 gravações guiadas (24/11/2026): 0,91 parado na única sessão
+  # com o problema; fora dela, no máximo 2,43 s acima de 0,5. Com 1 s ou 2 s uma sessão boa
+  # piorava. Só um caso positivo: refinar com mais gravações, nunca "no olho".
+  scale_band: 0.5
+  scale_hold_s: 3.0
 
 # Marcha no lugar (spec 018): andar (w) e correr (ctrl). Valores INICIAIS da T0 (sessões
 # guiadas de 01/11/2026, 1,5 m e 2 m), a refinar na T6; nunca mude "no olho".

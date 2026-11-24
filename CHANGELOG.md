@@ -23,6 +23,11 @@ As versões 0.1 e 0.2 foram reconstruídas a partir do histórico do git (não t
 ### Mudado
 - O ruff impede o núcleo de importar o overlay.
 
+### Corrigido
+- Quem ligava o app perto da câmera e depois ia para o lugar ficava com a base do pulo e do
+  agachar errada (agachar preso, pulo sem resposta). Agora, se a distância muda muito por 3 s,
+  o app solta as teclas e mede as bases de novo (`baseline.scale_band`, `scale_hold_s`).
+
 ## [0.2.0] - 2026-11-01
 
 ### Adicionado

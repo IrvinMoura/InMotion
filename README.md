@@ -222,6 +222,7 @@ InMotion/
 | Gesto reconhecido no overlay, mas nada acontece no jogo | Jogo sem foco, app pausado (`F8`) ou jogo rodando como administrador | Clique na janela do jogo; confira se não está PAUSADO; se o jogo roda como administrador, abra o terminal como administrador também |
 | Câmera do jogo gira rápido demais ou dá trancos | Aceleração do mouse do Windows ou do jogo | No Minecraft, ligue *Raw Input* (Controles → Configurações do mouse); ajuste a velocidade com `--set head_look.yaw.gain=800` |
 | Tecla parece presa | Tracking perdido no meio de um gesto | `F8` solta tudo; o app também solta sozinho ao perder a pose por 0,2 s |
+| Agachar preso ou pulo sem resposta depois de mudar de lugar | Base medida em outra distância | Fique parado uns 4 s no lugar novo (o app mede de novo se a distância mudou muito) ou aperte `F8` duas vezes |
 | Canhoto: os braços estão trocados | Lateralidade padrão é destro | `--set handedness=left` |
 
 ## Desenvolvimento
