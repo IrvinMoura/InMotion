@@ -438,15 +438,10 @@ def lean_direction_2d(pose: PoseFrame, geometry: GeometryConfig) -> float | None
 
 
 def lean_back_rel(ctx: FrameContext, geometry: GeometryConfig) -> float | None:
-    """Spec 019: inclinação sagital (frente ou trás, sem inclinar para os lados).
-
-    Combina o encurtamento 2D da altura vertical do tronco ``(b_tronco − h_tronco)/s``
-    (independente de profundidade) com o desvio 3D ``|lean_forward − b_lean|``. Zera
-    durante marcha, pulo/agachamento ou inclinação lateral (``|lean_left| >= 0,20``).
-    """
+    """Recuo relativo ao repouso. Sem profundidade, o rosto dá o sentido do sinal 2D."""
     lf = lean_forward(ctx.pose, geometry)
     if ctx.lean_baseline_rad is None and ctx.shoulder_baseline_px is None:
-        return -lf if (lf is not None and lf < 0.0) else None
+        return None
     if ctx.march is not None and (ctx.march.steps > 0 or ctx.march.knee_lifted_recently):
         return 0.0
     jh = jump_height(ctx)
@@ -457,6 +452,11 @@ def lean_back_rel(ctx: FrameContext, geometry: GeometryConfig) -> float | None:
     lat_rad = abs(lat) if lat is not None else 0.0
     if lat_rad >= 0.20:
         return 0.0
+    if lf is not None and ctx.lean_baseline_rad is not None:
+        return max(0.0, ctx.lean_baseline_rad - lf)
+    direction = lean_direction_2d(ctx.pose, geometry)
+    if direction is None or direction >= 0.0:
+        return 0.0
     px = ctx.pose.pixels()
     s = ctx.shoulder_px
     theta_2d = 0.0
@@ -466,12 +466,7 @@ def lean_back_rel(ctx: FrameContext, geometry: GeometryConfig) -> float | None:
         sh_y = float(px[_SHOULDERS[0], 1] + px[_SHOULDERS[1], 1]) / 2.0
         cur_th = (hp_y - sh_y) / s
         theta_2d = max(0.0, (base_th - cur_th) - 1.5 * (1.0 - math.cos(lat_rad)))
-    theta_3d = (
-        abs(lf - ctx.lean_baseline_rad)
-        if (lf is not None and ctx.lean_baseline_rad is not None)
-        else 0.0
-    )
-    return max(theta_2d, theta_3d)
+    return theta_2d
 
 
 def lean_side(pose: PoseFrame, side: Side, geometry: GeometryConfig) -> float | None:

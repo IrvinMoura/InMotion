@@ -1,4 +1,4 @@
-"""Ponto de entrada: ``python -m inmotion``. Composição: lê a CLI e configura o logging."""
+"""Interface de linha de comando do InMotion."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import logging
 import sys
 from collections.abc import Sequence
+from contextlib import ExitStack
 from pathlib import Path
 
 from inmotion.config.loader import DEFAULT_CONFIG_PATH, load_config
@@ -21,7 +22,7 @@ EXIT_USAGE = 2  # configuração ou ambiente inválido (modelo ausente, câmera 
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """CLI. Os atalhos (``--camera``...) não têm padrão: o padrão vem do YAML (RF5/RF6)."""
+    """Os valores padrão das opções vêm do YAML."""
     parser = argparse.ArgumentParser(
         prog="python -m inmotion",
         description="Controla jogos por movimento corporal usando uma webcam.",
@@ -48,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="sobrescreve um campo, valor lido como YAML (repetível): --set filters.ema.alpha=0.4",
     )
     parser.add_argument("--camera", type=int, help="índice da câmera (padrão: camera.index)")
+    parser.add_argument("--voice", action="store_true", help="ativa comandos de voz offline")
     parser.add_argument(
         "--camera-backend",
         choices=("dshow", "msmf", "any"),
@@ -83,6 +85,7 @@ def flag_overrides(args: argparse.Namespace) -> list[str]:
     """Traduz os atalhos da CLI em ``caminho=valor`` (valores citados como YAML/JSON)."""
     pairs: list[tuple[str, object]] = [
         ("camera.index", args.camera),
+        ("voice.enabled", True if args.voice else None),
         ("camera.backend", args.camera_backend),
         ("pose.model_dir", None if args.model_dir is None else str(args.model_dir)),
         ("pose.variant", args.model_variant),
@@ -132,6 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run,
     )
     from inmotion.capture.camera import Camera
+    from inmotion.capture.microphone import MicrophoneCommands
     from inmotion.clock import MonotonicClock
     from inmotion.config.schema import validate_profile
     from inmotion.gestures.factory import BODY_GESTURE_NAMES
@@ -147,7 +151,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         backend = KeyboardMouseBackend()
         hotkeys = WindowsHotkeys(frozenset({safety_config.pause_key, safety_config.exit_key}))
-        validate_profile(profile, BODY_GESTURE_NAMES, backend.supported_keys())
+        supported = backend.supported_keys()
+        validate_profile(profile, BODY_GESTURE_NAMES, supported)
+        if config.voice.enabled:
+            for key in (config.voice.inventory_key, config.voice.menu_key):
+                if (
+                    key not in supported
+                    or key in {safety_config.pause_key, safety_config.exit_key}
+                    or key.startswith("mouse_")
+                ):
+                    raise ConfigError("voice", f"tecla de menu inválida ou reservada: {key!r}")
         for gesture, binding in profile.bindings.items():
             if binding.input in {safety_config.pause_key, safety_config.exit_key}:
                 raise ConfigError(
@@ -157,31 +170,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         _log.error("Configuração de input inválida: %s", exc)
         return EXIT_USAGE
     _log.info("Perfil de jogo: %s", profile.name)
-    # O modelo é checado ANTES de abrir a câmera: sem ele, nada de hardware é tocado.
-    try:
-        estimator = MediaPipePoseEstimator(config.pose)
-    except (ModelNotFoundError, RuntimeError, ValueError, OSError) as exc:
-        _log.error("%s", exc)
-        return EXIT_USAGE
-
     clock = MonotonicClock()
-    camera = Camera(config.camera, clock)
-    try:
-        camera.start()
-    except BaseException as exc:
+    with ExitStack() as startup:
         try:
-            camera.close()
-        finally:
-            estimator.close()
-        if isinstance(exc, OSError | ValueError | RuntimeError):
+            estimator = MediaPipePoseEstimator(config.pose)
+        except (ModelNotFoundError, RuntimeError, ValueError, OSError) as exc:
+            _log.error("%s", exc)
+            return EXIT_USAGE
+        startup.callback(estimator.close)
+        camera = Camera(config.camera, clock)
+        startup.callback(camera.close)
+        try:
+            camera.start()
+        except (OSError, ValueError, RuntimeError) as exc:
             _log.error("Falha ao abrir a câmera: %s", exc)
             return EXIT_USAGE
-        if isinstance(exc, KeyboardInterrupt):
+        except KeyboardInterrupt:
             return 0
-        raise
-    _log.info("Câmera aberta: %dx%d a %.0f FPS", *camera.actual)
+        _log.info("Câmera aberta: %dx%d a %.0f FPS", *camera.actual)
 
-    try:
         preprocessor = Preprocessor(config.preprocess)
         deps = AppDeps(
             source=camera,
@@ -206,13 +213,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             exit_zone=config.exit_zone,
             config=config,
             preprocess=preprocessor.apply,
+            profile=profile,
         )
-        deps.profile = profile
-    except BaseException:
-        # Falhou antes do run(): quem fecha a câmera e o estimador somos nós.
-        camera.close()
-        estimator.close()
-        raise
+        if config.voice.enabled:
+            try:
+                deps.voice = MicrophoneCommands(config.voice, clock)
+            except Exception as exc:
+                _log.error("Falha ao iniciar a voz: %s", exc)
+                return EXIT_USAGE
+            startup.callback(deps.voice.close)
+        startup.pop_all()  # run() assume e fecha todos os recursos da sessão.
     _log.info("Rodando: %s pausa/retoma, %s sai.", safety_config.pause_key, safety_config.exit_key)
     try:
         return run(deps, safety_config)

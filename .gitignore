@@ -38,6 +38,8 @@ reports/
 
 # --- Modelos MediaPipe (.task são baixados, não versionados) ---
 models/*.task
+models/vosk-model-*/
+models/vosk-model-*.zip
 
 # --- Mídia e dados pesados ---
 *.mp4

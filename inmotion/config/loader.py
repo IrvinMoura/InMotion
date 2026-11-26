@@ -44,6 +44,12 @@ def _read_yaml(path: Path) -> dict[str, object]:
     return dict(data)
 
 
+def load_minecraft_profile() -> GameProfile:
+    """Perfil padrão usado também pelas ferramentas executadas sem --game."""
+    data = _read_yaml(GAMES_DIR / "minecraft.yaml")
+    return build(GameProfile, {key: data[key] for key in PROFILE_KEYS if key in data})
+
+
 def _nest(keys: Sequence[str], value: object) -> dict[str, object]:
     """``(('a', 'b'), v)`` → ``{'a': {'b': v}}``."""
     head, *rest = keys

@@ -1,15 +1,9 @@
-# Configuração das ferramentas do Projeto InMotion.
-# Dependências ficam em requirements.txt / requirements-dev.txt (versões fixas).
-
 [project]
 name = "inmotion"
 version = "0.3.0"
 description = "Controle de jogos por visão computacional com uma webcam (Projeto A3)."
 requires-python = ">=3.10,<3.11"  # Ambiente validado; veja CONTRIBUTING.md.
 
-# ---------------------------------------------------------------------------
-# Ruff — lint + format
-# ---------------------------------------------------------------------------
 [tool.ruff]
 target-version = "py310"
 line-length = 100
@@ -28,14 +22,13 @@ select = [
     "PT",       # estilo pytest
     "NPY",      # numpy
     "RUF",      # regras do ruff
-    "TID",      # imports banidos (regra de camadas, abaixo)
-    "T20",      # sem print: usar logging (spec 002, CA6)
+    "TID",      # restrições de importação
+    "T20",      # usar logging para a saída do aplicativo
 ]
 # Símbolos matemáticos usados nas docstrings.
 allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "τ", "∪"]
 
-# Regra de camadas: o núcleo é puro. Estes imports são proibidos por padrão
-# e liberados SÓ nos adaptadores listados em per-file-ignores.
+# Os adaptadores concentram o acesso ao hardware e ao relógio do sistema.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "cv2".msg = "Núcleo puro: cv2 só em adaptadores (CONTRIBUTING.md)."
 "mediapipe".msg = "Núcleo puro: mediapipe só no adaptador de pose (CONTRIBUTING.md)."
@@ -47,7 +40,6 @@ allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "�
 "time.perf_counter".msg = "Tempo explícito: o núcleo recebe `t` como parâmetro (use um Clock no adaptador)."
 
 [tool.ruff.lint.per-file-ignores]
-# Adaptadores e composição: podem usar I/O e bibliotecas externas.
 "inmotion/__main__.py" = ["TID251"]
 "inmotion/app.py" = ["TID251"]
 "inmotion/clock.py" = ["TID251"]  # único lugar do núcleo que lê o relógio
@@ -65,14 +57,11 @@ allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "�
 quote-style = "double"
 docstring-code-format = true
 
-# ---------------------------------------------------------------------------
-# pytest
-# ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["."]
-# hardware nunca roda por padrão; slow roda (use -m "not slow" para pular)
+# A suíte padrão inclui os testes lentos. Use -m hardware para os testes com dispositivos.
 addopts = ["-ra", "--strict-markers", "--strict-config", "-m", "not hardware"]
 markers = [
     "hardware: precisa de webcam e/ou injeção de input no Windows (rodar com -m hardware)",
@@ -80,9 +69,6 @@ markers = [
 ]
 xfail_strict = true
 
-# ---------------------------------------------------------------------------
-# mypy — estrito só no núcleo
-# ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.10"
 files = ["inmotion"]
@@ -91,8 +77,7 @@ warn_redundant_casts = true
 show_error_codes = true
 pretty = true
 
-# Núcleo: equivalente a --strict (a opção `strict` não vale por módulo, por isso
-# as flags estão explícitas). Todo módulo puro novo entra nesta lista.
+# O mypy exige opções individuais para aplicar a checagem estrita por módulo.
 [[tool.mypy.overrides]]
 module = [
     "inmotion.types",
@@ -100,6 +85,7 @@ module = [
     "inmotion.pipeline",
     "inmotion.history",
     "inmotion.session",
+    "inmotion.voice",
     "inmotion.watchdog",
     "inmotion.vision.landmarks",
     "inmotion.vision.geometry",

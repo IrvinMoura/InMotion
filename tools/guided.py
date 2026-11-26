@@ -487,17 +487,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     # Imports pesados aqui: o --help não abre câmera nem carrega o MediaPipe.
-    from inmotion.app import pose_filter_from_config
     from inmotion.capture.camera import Camera
     from inmotion.clock import MonotonicClock
-    from inmotion.fps import FpsMeter
-    from inmotion.gestures.factory import build_body_gestures
     from inmotion.input.hotkeys import WindowsHotkeys
     from inmotion.overlay import render
-    from inmotion.pipeline import Pipeline
     from inmotion.recorder import Recorder
     from inmotion.safety import SafetyAction, SafetyManager, SafetyState, TrackedInput
-    from inmotion.vision.landmarks import Side
+    from inmotion.session import create_pipeline, pose_filter_from_config
     from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError
     from inmotion.vision.preprocess import Preprocessor
     from tools.record import compute_config_hash
@@ -509,26 +505,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     keys = {name: b.input for name, b in profile.bindings.items()}
     backend = _LogBackend()
     safety = SafetyManager(TrackedInput(backend, config.safety.always_release), config.safety)
-    gestures = build_body_gestures(
-        profile.bindings,
-        Side(config.handedness),
-        config.gestures,
-        config.geometry,
-        config.crouch.feature,
-        config.march,
-    )
-    pipeline = Pipeline(
-        safety,
-        gestures,
-        FpsMeter(),
-        pose_filter_from_config(config.filters),
-        profile=profile,
-        mapper_params=config.mapper,
-        baseline_params=config.baseline,
-        march_params=config.march,
-        geometry=config.geometry,
-        head_look=config.head_look if config.head_look.enabled else None,
-    )
+    pipeline = create_pipeline(safety, config, profile, pose_filter_from_config(config.filters))
     schedule = Schedule(SCRIPTS[args.script](config.handedness))
     preprocess = Preprocessor(config.preprocess).apply
     try:
@@ -585,12 +562,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 bars = [
                     (
                         g.name,
-                        g.feature_value,
-                        config.gestures[g.name].theta_on,
-                        config.gestures[g.name].theta_off,
-                        g.snapshot().state is GestureState.ACTIVE,
+                        g.filtered_value,
+                        g.theta_on,
+                        g.theta_off,
+                        g.state is GestureState.ACTIVE,
                     )
-                    for g in gestures
+                    for g in result.gestures
                 ]
                 recent = [k.upper() for t, k in backend.presses if t_rel - t < 1.0]
                 state = {SafetyState.ACTIVE: "ATIVO", SafetyState.PAUSED: "PAUSADO"}.get(

@@ -1,57 +1,18 @@
 """Montagem compartilhada do pipeline para execução, replay e simulação sem hardware."""
 
-from inmotion.config.schema import AppConfig, Binding, FilterConfig, GameProfile
+from inmotion.config.loader import load_minecraft_profile
+from inmotion.config.schema import AppConfig, FilterConfig, GameProfile
 from inmotion.filters.ema import Ema
 from inmotion.filters.one_euro import OneEuro
 from inmotion.filters.pose_filter import PoseFilter
 from inmotion.fps import FpsMeter
-from inmotion.gestures.arbiter import ArbiterConfig
-from inmotion.gestures.base import GestureKind
 from inmotion.gestures.factory import build_body_gestures
 from inmotion.pipeline import Pipeline
 from inmotion.safety import SafetyManager
 from inmotion.vision.landmarks import Side
+from inmotion.voice import VoiceConfig
 
-DEFAULT_PROFILE = GameProfile(
-    "minecraft",
-    {
-        "attack": Binding("mouse_left", GestureKind.HOLD),
-        "use": Binding("mouse_right", GestureKind.HOLD),
-        "jump": Binding("space", GestureKind.TRIGGER),
-        "crouch": Binding("shift", GestureKind.HOLD),
-        "walk": Binding("w", GestureKind.HOLD),
-        "sprint": Binding("ctrl", GestureKind.HOLD),
-        "walk_back": Binding("s", GestureKind.HOLD),
-        "strafe_left": Binding("a", GestureKind.HOLD),
-        "strafe_right": Binding("d", GestureKind.HOLD),
-    },
-    ArbiterConfig(
-        priority=(
-            "both_arms",
-            "crouch",
-            "jump",
-            "attack",
-            "use",
-            "walk",
-            "sprint",
-            "walk_back",
-            "strafe_left",
-            "strafe_right",
-        ),
-        exclusive=(
-            frozenset({"crouch", "jump"}),
-            frozenset({"crouch", "walk"}),
-            frozenset({"crouch", "sprint"}),
-            frozenset({"crouch", "walk_back"}),
-            frozenset({"crouch", "strafe_left"}),
-            frozenset({"crouch", "strafe_right"}),
-            frozenset({"walk", "walk_back"}),
-            frozenset({"sprint", "walk_back"}),
-            frozenset({"strafe_left", "strafe_right"}),
-        ),
-        combos={"both_arms": frozenset({"attack", "use"})},
-    ),
-)
+DEFAULT_PROFILE = load_minecraft_profile()
 
 
 def pose_filter_from_config(config: FilterConfig) -> PoseFilter | None:
@@ -68,8 +29,8 @@ def create_pipeline(
     config: AppConfig,
     profile: GameProfile,
     pose_filter: PoseFilter | None,
+    voice: VoiceConfig | None = None,
 ) -> Pipeline:
-    """Usa os mesmos parâmetros de gestos, filtros, bases e mapeamento em todo fluxo."""
     gestures = build_body_gestures(
         profile.bindings,
         Side(config.handedness),
@@ -89,4 +50,5 @@ def create_pipeline(
         march_params=config.march,
         geometry=config.geometry,
         head_look=config.head_look if config.head_look.enabled else None,
+        voice=voice,
     )

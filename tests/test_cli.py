@@ -17,6 +17,7 @@ EXPECTED_ARGS = [
     "--game",
     "--set",
     "--profile",
+    "--voice",
 ]
 
 
@@ -139,6 +140,13 @@ def test_binding_cannot_trigger_pause_key() -> None:
     proc = _run_cli("--game", "minecraft", "--set", "bindings.jump.input=f8")
     assert proc.returncode == 2
     assert "bindings.jump.input" in proc.stderr
+
+
+def test_voice_cannot_trigger_exit_key() -> None:
+    proc = _run_cli("--voice", "--set", "voice.menu_key=f9")
+    assert proc.returncode == 2
+    assert "voice" in proc.stderr
+    assert "f9" in proc.stderr
 
 
 def test_set_handedness_left_swaps_arms() -> None:

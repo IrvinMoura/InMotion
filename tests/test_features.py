@@ -222,7 +222,7 @@ def test_lateral_lean_scale_and_translation_invariant(
 
 
 def test_lean_back_rel_compensates_resting_bias() -> None:
-    """Spec 019: inclinação sagital (frente ou trás) medida em relação à base R7."""
+    """A ré usa o repouso calibrado e só responde à inclinação para trás."""
     hip = BodyBaseline(BaselineParams(init_frames=2))
     lean_base = BodyBaseline(BaselineParams(init_frames=2))
     for i in range(2):
@@ -237,7 +237,7 @@ def test_lean_back_rel_compensates_resting_bias() -> None:
     ctx_fwd = build_context(
         fwd_pose, fwd_pose.t, GEOMETRY, hip, resting=False, lean_baseline=lean_base
     )
-    assert lean_back_rel(ctx_fwd, GEOMETRY) == pytest.approx(0.25, abs=1e-6)
+    assert lean_back_rel(ctx_fwd, GEOMETRY) == 0.0
 
 
 def test_lean_direction_2d_distinguishes_front_and_back() -> None:
@@ -259,6 +259,31 @@ def test_lean_direction_2d_distinguishes_front_and_back() -> None:
     assert back is not None
     assert front > 0.0
     assert back < 0.0
+
+
+@pytest.mark.parametrize(("mouth_y", "expected"), [(173.0, 0.0), (140.0, 0.30)])
+def test_reverse_without_world_uses_face_direction(mouth_y: float, expected: float) -> None:
+    # O tronco encurta 30 px nos dois casos. A posição do rosto distingue o sentido.
+    pose = make_body(with_world=False, shoulder_dy_px=30.0)
+    lm = np.array(pose.landmarks)
+    height = pose.image_size[1]
+    for eye in (PoseLandmark.LEFT_EYE, PoseLandmark.RIGHT_EYE):
+        lm[eye, 1] = (mouth_y - 20) / height
+    for mouth in (PoseLandmark.MOUTH_LEFT, PoseLandmark.MOUTH_RIGHT):
+        lm[mouth, 1] = mouth_y / height
+    pose = PoseFrame(t=0.0, image_size=pose.image_size, landmarks=lm)
+    ctx = FrameContext(
+        t=0.0,
+        pose=pose,
+        skeleton=None,
+        shoulder_px=100,
+        hip_y_px=300,
+        baseline_px=300,
+        shoulder_baseline_px=150,
+        shoulder_y_px=180,
+        shoulder_width_px=100,
+    )
+    assert lean_back_rel(ctx, GEOMETRY) == pytest.approx(expected)
 
 
 # --- Spec 017: crouch_drop (agachar pelos ombros) ---------------------------------------------

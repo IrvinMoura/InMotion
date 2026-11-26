@@ -31,6 +31,7 @@ from inmotion.input.backend import KeyName
 from inmotion.mapping import MapperParams
 from inmotion.safety import SafetyConfig
 from inmotion.vision.geometry import GeometryConfig
+from inmotion.voice import VoiceConfig
 
 CAMERA_BACKENDS: tuple[str, ...] = ("dshow", "msmf", "any")
 POSE_VARIANTS: tuple[str, ...] = ("lite", "full", "heavy")
@@ -179,6 +180,7 @@ class AppConfig:
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     handedness: Literal["right", "left"] = "right"
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
 
 
 @dataclass(frozen=True)
