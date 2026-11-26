@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from inmotion.history import SeriesView
 from inmotion.overlay import handedness_label, render
 from inmotion.pipeline import StepResult
 from inmotion.safety import SafetyState
@@ -178,3 +179,166 @@ def test_skeleton_bones_and_debug_panels_rendered() -> None:
     # Painel M=S*R*T no canto inferior direito e painel de telemetria no inferior esquerdo.
     assert out[320:472, 488:632].any()
     assert out[420:472, 8:378].any()
+
+
+# ---------------------------------------------------------------------------
+# Spec 009 (revisão de 18/11): níveis, gráfico e pureza (CA1, CA2)
+# ---------------------------------------------------------------------------
+
+FULL_SIZE = (640, 480)
+
+
+def full_result() -> StepResult:
+    """Pessoa inteira de frente, esqueleto normalizado e dois gestos na telemetria."""
+    from inmotion.gestures.base import GestureKind, GestureState
+    from inmotion.pipeline import GestureTelemetry
+    from inmotion.vision.geometry import GeometryConfig, normalize_skeleton
+    from tests.helpers import make_body, with_face
+
+    pose = with_face(make_body(t=1.0))
+    skel = normalize_skeleton(pose, GeometryConfig())
+    tele = tuple(
+        GestureTelemetry(name, GestureKind.TRIGGER, GestureState.IDLE, 0.5, 0.4, 0.8, 0.6)
+        for name in ("attack", "jump")
+    )
+    return StepResult(
+        t=1.0,
+        fps=30.0,
+        safety_state=SafetyState.ACTIVE,
+        pose=pose,
+        normalized=skel,
+        gestures=tele,
+        pressed=frozenset({"w"}),
+    )
+
+
+def series() -> SeriesView:
+    t = np.linspace(0.0, 1.0, 31)
+    return SeriesView(
+        t=t,
+        raw=np.sin(6 * t),
+        filtered=np.sin(6 * t - 0.3),
+        theta_on=0.8,
+        theta_off=0.6,
+        window_s=1.0,
+    )
+
+
+def camera_image() -> np.ndarray:
+    rng = np.random.default_rng(9)
+    return rng.integers(0, 256, (FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+
+
+def test_render_twice_is_identical() -> None:
+    """O1: mesmo resultado e mesma vista → mesma imagem; nada de entrada muda."""
+    img = camera_image()
+    before = img.copy()
+    res, view = full_result(), series()
+    raw_before = view.raw.copy()
+    first = render(img, res, "right", mirror=True, plot=view, plot_name="attack")
+    second = render(img, res, "right", mirror=True, plot=view, plot_name="attack")
+    assert np.array_equal(first, second)
+    assert np.array_equal(img, before)
+    assert np.array_equal(view.raw, raw_before)
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+def test_off_level_returns_the_camera_image(mirror: bool) -> None:
+    from inmotion.overlay import OverlayLevel
+
+    img = camera_image()
+    out = render(img, full_result(), "right", mirror=mirror, level=OverlayLevel.OFF)
+    assert out is not img
+    assert np.array_equal(out, img[:, ::-1] if mirror else img)
+
+
+def test_levels_change_output() -> None:
+    """CA2: o ``minimal`` tira os painéis (miniquadro e tabela), mas mantém o esqueleto."""
+    from inmotion.overlay import OverlayLevel
+
+    img = np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+    res = full_result()
+    full = render(img, res, "right", level=OverlayLevel.FULL)
+    minimal = render(img, res, "right", level=OverlayLevel.MINIMAL)
+    inset = (slice(320, 472), slice(488, 632))
+    table = (slice(420, 472), slice(8, 378))
+    assert full[inset].any()
+    assert full[table].any()
+    assert not minimal[inset].any()
+    assert not minimal[table].any()
+    assert np.array_equal(minimal[150, 320], full[150, 320])  # osso entre os ombros
+    assert minimal[150, 320].any()
+
+
+def test_full_draws_elbow_angles_and_minimal_does_not() -> None:
+    """RF3 (A7): arco e graus perto de cada cotovelo só no ``full``."""
+    from inmotion.overlay import OverlayLevel
+    from inmotion.vision.landmarks import PoseLandmark
+
+    img = np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+    res = full_result()
+    assert res.pose is not None
+    full = render(img, res, level=OverlayLevel.FULL)
+    minimal = render(img, res, level=OverlayLevel.MINIMAL)
+    w, h = FULL_SIZE
+    for elbow in (PoseLandmark.LEFT_ELBOW, PoseLandmark.RIGHT_ELBOW):
+        x = round(float(res.pose.landmarks[elbow, 0]) * w)
+        y = round(float(res.pose.landmarks[elbow, 1]) * h)
+        near = (slice(y - 40, y + 40), slice(x - 40, x + 40))
+        assert not np.array_equal(full[near], minimal[near])
+
+
+PLOT_BOX = (slice(8, 130), slice(372, 632))  # canto superior direito em 640×480
+
+
+def test_plot_drawn_only_with_view() -> None:
+    """RF2: o gráfico aparece no ``full`` com uma vista; sem ela ou no ``minimal``, não."""
+    from inmotion.overlay import OverlayLevel
+
+    img = np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+    res = full_result()
+    with_plot = render(img, res, plot=series(), plot_name="attack")
+    without = render(img, res)
+    minimal = render(img, res, level=OverlayLevel.MINIMAL, plot=series(), plot_name="attack")
+    assert with_plot[PLOT_BOX].any()
+    assert not without[PLOT_BOX].any()
+    assert not minimal[PLOT_BOX].any()
+
+
+def test_plot_survives_gaps_and_short_series() -> None:
+    """NaN (frames sem valor) interrompe a linha; série curta ou vazia não quebra."""
+    from inmotion.history import SeriesView
+
+    img = np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+    t = np.linspace(0.0, 1.0, 10)
+    raw = np.where(np.arange(10) % 3 == 0, np.nan, t)
+    gappy = SeriesView(t=t, raw=raw, filtered=raw, theta_on=0.8, theta_off=0.6, window_s=3.0)
+    empty = SeriesView(
+        t=np.empty(0),
+        raw=np.empty(0),
+        filtered=np.empty(0),
+        theta_on=0.8,
+        theta_off=0.6,
+        window_s=3.0,
+    )
+    for view in (gappy, empty):
+        out = render(img, full_result(), plot=view, plot_name="attack")
+        assert out.shape == img.shape
+
+
+@pytest.mark.slow
+def test_render_under_3ms() -> None:
+    """CA7 (RNF1): ``full`` com espelho, ângulos, miniquadro, tabela e gráfico < 3 ms."""
+    import time
+
+    img = camera_image()
+    res, view = full_result(), series()
+    for _ in range(20):  # aquece caches
+        render(img, res, "right", mirror=True, plot=view, plot_name="attack")
+    n = 200
+    t0 = time.perf_counter()
+    for _ in range(n):
+        render(img, res, "right", mirror=True, plot=view, plot_name="attack")
+    mean_ms = (time.perf_counter() - t0) / n * 1000.0
+    print(f"overlay full: {mean_ms:.2f} ms/frame")
+    assert mean_ms < 3.0

@@ -429,3 +429,23 @@ def test_head_look_pitch_drift_during_gestures(name: str) -> None:
         if (name, label) in PITCH_KNOWN:
             continue
         assert abs(deg) <= MAX_DRIFT_DEG, (label, deg)
+
+
+# --- Bases R7 x distância (24/11/2026) ---
+# Recorte de recordings/guided_p1_20261101-011530 (0 a 62,6 s, sem world): a base é medida em
+# 1,6 s com a pessoa parada perto da câmera (ombros com 276 px) e ela vai para 2 m entre 2 e 5 s.
+# Sem refazer as bases, parado marcava pulo 0,85 e agachar 0,94 (acima dos limiares).
+
+
+def test_walking_to_the_position_after_the_baseline_still_jumps_and_crouches() -> None:
+    rec, presses = _replay_like_app("far_start_2m.npz")
+    assert _presses_in(rec, "rest", presses) == []
+    assert _presses_in(rec, "jump", presses).count("space") == 3
+    assert _presses_in(rec, "jump", presses).count("shift") == 0
+    assert _presses_in(rec, "crouch", presses).count("shift") == 1
+
+
+def test_without_distance_rule_the_first_position_breaks_jump() -> None:
+    """Controle: com a regra desligada, a mesma gravação não reconhece nenhum pulo."""
+    rec, presses = _replay_like_app("far_start_2m.npz", overrides=("baseline.scale_band=null",))
+    assert _presses_in(rec, "jump", presses).count("space") == 0

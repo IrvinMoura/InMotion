@@ -15,8 +15,9 @@ from numpy.typing import NDArray
 from inmotion.config.schema import AppConfig, FilterConfig, GameProfile
 from inmotion.exit_zone import ExitZone, ExitZoneConfig
 from inmotion.filters.pose_filter import PoseFilter
+from inmotion.history import SignalHistory
 from inmotion.input.backend import HotkeySource, InputBackend
-from inmotion.overlay import render
+from inmotion.overlay import OverlayLevel, render
 from inmotion.pipeline import StepResult
 from inmotion.ports import Clock, Display, FrameSource, PoseEstimator
 from inmotion.safety import (
@@ -62,12 +63,22 @@ class AppDeps:
     voice: VoiceSource | None = None
 
 
+_LEVEL_CYCLE = (OverlayLevel.FULL, OverlayLevel.MINIMAL, OverlayLevel.OFF)
+KEY_LEVEL = ord("o")  # spec 009: teclas de debug, com a janela do overlay em foco
+KEY_PLOT = 9  # Tab
+KEY_SOBEL = ord("s")
+
+
 class OpenCvDisplay:
     """``Display`` sobre ``cv2.imshow``: desenha o overlay e detecta a janela fechada.
 
     A janela é redimensionável (``WINDOW_NORMAL`` mantendo a proporção) e nasce no tamanho
     do frame: dá para arrastá-la e dividir a tela com o jogo. Só muda a exibição; a
     imagem processada continua a mesma.
+
+    Spec 009: guarda o histórico do gráfico e o estado da exibição, mudado pelas teclas
+    ``o`` (nível ``full → minimal → off``), ``Tab`` (próximo gesto do gráfico) e ``s``
+    (fundo com o gradiente de Sobel, A3, se houver ``sobel``).
     """
 
     def __init__(
@@ -76,23 +87,56 @@ class OpenCvDisplay:
         handedness: str | None = None,
         *,
         mirror: bool = True,
+        level: OverlayLevel = OverlayLevel.FULL,
+        plot_gesture: str = "attack",
+        history_s: float = 3.0,
+        sobel: Callable[[NDArray[np.uint8]], NDArray[np.uint8]] | None = None,
+        sobel_on: bool = False,
     ) -> None:
         self._name = window_name
         self._handedness = handedness  # "right" | "left": o overlay mostra o modo (spec 017)
         self._mirror = mirror
         self._created = False
+        self.level = level
+        self.plot_gesture = plot_gesture
+        self._history = SignalHistory(history_s)
+        self._sobel = sobel
+        self.sobel_on = sobel_on and sobel is not None
 
     def show(self, image: NDArray[np.uint8], result: StepResult) -> bool:
         """Mostra o frame com overlay; False se a janela foi fechada."""
-        frame = render(image, result, self._handedness, mirror=self._mirror)
+        self._history.push(result.t, result.gestures)
+        background = image
+        if self.sobel_on and self._sobel is not None:
+            background = self._sobel(image)
+        frame = render(
+            background,
+            result,
+            self._handedness,
+            mirror=self._mirror,
+            level=self.level,
+            plot=self._history.view(self.plot_gesture),
+            plot_name=self.plot_gesture,
+        )
         if not self._created:
             cv2.namedWindow(self._name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
             height, width = frame.shape[:2]
             cv2.resizeWindow(self._name, width, height)
             self._created = True
         cv2.imshow(self._name, frame)
-        cv2.waitKey(1)
+        self._on_key(cv2.waitKey(1) & 0xFF)
         return bool(cv2.getWindowProperty(self._name, cv2.WND_PROP_VISIBLE) >= 1)
+
+    def _on_key(self, key: int) -> None:
+        if key == KEY_LEVEL:
+            self.level = _LEVEL_CYCLE[(_LEVEL_CYCLE.index(self.level) + 1) % len(_LEVEL_CYCLE)]
+        elif key == KEY_PLOT:
+            names = self._history.names()
+            if names:
+                i = names.index(self.plot_gesture) + 1 if self.plot_gesture in names else 0
+                self.plot_gesture = names[i % len(names)]
+        elif key == KEY_SOBEL and self._sobel is not None:
+            self.sobel_on = not self.sobel_on
 
     def close(self) -> None:
         cv2.destroyAllWindows()
@@ -195,6 +239,8 @@ def _run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = No
                 else:
                     result = replace(pipeline.step(pose, t, command), exit_zone=zone)
                 zone_inside = zone is not None and zone.inside
+                if packet is not None:  # spec 009 RF5: da captura ao input já enviado
+                    result = replace(result, latency_ms=(deps.clock.now() - packet.t) * 1000.0)
                 if (
                     deps.display is not None
                     and packet is not None

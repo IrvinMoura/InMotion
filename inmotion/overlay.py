@@ -6,17 +6,37 @@ testes legados (elementos avançados só desenham quando presentes no ``StepResu
 
 from __future__ import annotations
 
+import math
+from enum import Enum
+
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from inmotion.exit_zone import ExitZoneState
 from inmotion.gestures.base import GestureState
+from inmotion.history import SeriesView
 from inmotion.pipeline import GestureTelemetry, StepResult
 from inmotion.safety import SafetyState
 from inmotion.types import PoseFrame
-from inmotion.vision.geometry import NormalizedSkeleton
+from inmotion.vision.geometry import (
+    NormalizedSkeleton,
+    apply_h,
+    inset_matrix,
+    joint_angle,
+    mirror_matrix,
+)
 from inmotion.vision.landmarks import PoseLandmark
+
+
+class OverlayLevel(Enum):
+    """Nível de detalhe (spec 009 RF1): ``off`` só a imagem, ``minimal`` o essencial e ``full``
+    tudo."""
+
+    OFF = "off"
+    MINIMAL = "minimal"
+    FULL = "full"
+
 
 # Hershey só desenha ASCII: sem acentos nos textos do overlay.
 _STATE_TEXT = {
@@ -76,6 +96,23 @@ _ZONE_THICKNESS = 2
 _ZONE_TEXT_SCALE = 0.45
 _ZONE_TEXT_PAD = (4, 16)
 _ZONE_LABEL = "SAIR ({:.0f}s)"
+_INSET_EXTENT = 2.0  # o miniquadro mostra [−2, 2]² em larguras de ombro
+_ANGLE_COLOR = (255, 120, 255)
+_ANGLE_RADIUS = 18
+_ANGLE_TEXT_SCALE = 0.45
+_ANGLE_TEXT_OFFSET = 22
+_PLOT_W, _PLOT_H = 260, 122
+_PLOT_MARGIN = 8
+_PLOT_PAD = (8, 22, 8, 16)  # esquerda, topo (título), direita, base (legenda)
+_PLOT_RAW_COLOR = (150, 150, 150)
+_PLOT_FILTERED_COLOR = (80, 230, 120)
+_PLOT_ON_COLOR = (0, 80, 255)
+_PLOT_OFF_COLOR = (0, 220, 220)
+_PLOT_SPAN_PAD = 0.1  # folga vertical, fração da faixa de valores
+_ARMS: tuple[tuple[int, int, int], ...] = (
+    (PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_ELBOW, PoseLandmark.LEFT_WRIST),
+    (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST),
+)
 
 
 def _blend_rect(
@@ -162,19 +199,19 @@ def _draw_normalized_skeleton(out: NDArray[np.uint8], skel: NormalizedSkeleton) 
         cv2.LINE_AA,
     )
     inner_h = max(40, box_h - 40)
-    scale = min((box_w - 18) / 2.6, inner_h / 3.8)
     cx = bx0 + box_w // 2
     cy = by0 + 20 + round(inner_h * 0.48)
     cv2.line(out, (bx0 + 6, cy), (bx1 - 6, cy), (55, 60, 70), 1)
     cv2.line(out, (cx, by0 + 20), (cx, by1 - 18), (55, 60, 70), 1)
 
+    # p_inset = A·n_norm, A = T(c)·S(k) leva [−e, e]² à caixa (RF4).
+    side = float(min(box_w - 18, inner_h))
+    pixels = apply_h(inset_matrix((cx, cy), side, _INSET_EXTENT), skel.points[:, :2])
     pts: dict[int, tuple[int, int]] = {}
-    for idx in range(len(skel.points)):
-        nx, ny = float(skel.points[idx, 0]), float(skel.points[idx, 1])
-        if not (np.isfinite(nx) and np.isfinite(ny)):
+    for idx, (fx, fy) in enumerate(pixels):
+        if not (np.isfinite(fx) and np.isfinite(fy)):
             continue
-        px = round(cx + nx * scale)
-        py = round(cy + ny * scale)
+        px, py = round(float(fx)), round(float(fy))
         if bx0 + 2 <= px < bx1 - 2 and by0 + 18 <= py < by1 - 16:
             pts[idx] = (px, py)
     for a, b in POSE_CONNECTIONS:
@@ -244,6 +281,106 @@ def _draw_telemetry_panel(
     cv2.putText(out, f"{keys_text}  {look_text}", (x0 + 6, y1 - 6), _FONT, 0.40, io_color, 1)
 
 
+def _draw_elbow_angles(out: NDArray[np.uint8], pose: PoseFrame, *, mirror: bool) -> None:
+    """A7: arco e valor (graus) do ângulo em cada cotovelo visível, já na imagem exibida.
+
+    Os pontos passam por A5 (pixels) e, com ``mirror``, por A4 com ``W − 1`` (a mesma
+    conta do ``cv2.flip``), para o texto ser desenhado depois do espelho e ficar legível.
+    """
+    height, width = out.shape[:2]
+    lm = pose.landmarks
+    for idx in _ARMS:
+        if not bool(np.all(lm[list(idx), 3] >= _BONE_MIN_VIS)):
+            continue
+        pts = lm[list(idx), :2] * np.array([width, height], dtype=np.float64)
+        if mirror:
+            pts = apply_h(mirror_matrix(width - 1), pts)
+        if not np.isfinite(pts).all():
+            continue
+        shoulder, elbow, wrist = pts
+        try:
+            theta = joint_angle(shoulder, elbow, wrist)
+        except ValueError:
+            continue
+        a_u = math.degrees(math.atan2(*(shoulder - elbow)[::-1]))
+        a_v = math.degrees(math.atan2(*(wrist - elbow)[::-1]))
+        sweep = (a_v - a_u + 540.0) % 360.0 - 180.0  # o arco curto, de u para v
+        center = (round(float(elbow[0])), round(float(elbow[1])))
+        start, end = sorted((a_u, a_u + sweep))
+        axes = (_ANGLE_RADIUS, _ANGLE_RADIUS)
+        cv2.ellipse(out, center, axes, 0.0, start, end, _ANGLE_COLOR, 2, cv2.LINE_AA)
+        bisector = math.radians(a_u + sweep / 2.0 + 180.0)  # texto do lado de fora do arco
+        tx = center[0] + round(_ANGLE_TEXT_OFFSET * math.cos(bisector)) - 10
+        ty = center[1] + round(_ANGLE_TEXT_OFFSET * math.sin(bisector)) + 4
+        text = f"{math.degrees(theta):.0f}"
+        cv2.putText(out, text, (tx, ty), _FONT, _ANGLE_TEXT_SCALE, _ANGLE_COLOR, 1, cv2.LINE_AA)
+
+
+def _segments(xs: NDArray[np.float64], ys: NDArray[np.float64]) -> list[NDArray[np.int32]]:
+    """Trechos contínuos (sem NaN) da linha, já em pixels inteiros para o ``polylines``."""
+    finite = np.isfinite(ys)
+    pieces: list[NDArray[np.int32]] = []
+    start = None
+    for i, ok in enumerate([*finite.tolist(), False]):
+        if ok and start is None:
+            start = i
+        elif not ok and start is not None:
+            if i - start >= 2:
+                pts = np.stack([xs[start:i], ys[start:i]], axis=1)
+                pieces.append(np.round(pts).astype(np.int32).reshape(-1, 1, 2))
+            start = None
+    return pieces
+
+
+def _draw_plot(out: NDArray[np.uint8], view: SeriesView, name: str | None) -> None:
+    """RF2: bruto × filtrado nos últimos ``H = window_s`` segundos, com ``θ_on`` e ``θ_off``.
+
+    ``x = x0 + (t − (t_n − H))/H·w`` e ``y = y0 + h·(1 − (f − f_min)/(f_max − f_min))``,
+    com ``t_n`` o último instante e a faixa ``[f_min, f_max]`` cobrindo valores e limiares.
+    """
+    height, width = out.shape[:2]
+    if width < 420 or height < 240:
+        return
+    x0 = width - _PLOT_W - _PLOT_MARGIN
+    y0 = _PLOT_MARGIN
+    _blend_rect(out, x0, y0, x0 + _PLOT_W, y0 + _PLOT_H, (18, 20, 24))
+    title = f"{name or '?'}: bruto x filtrado ({view.window_s:.0f}s)"
+    cv2.putText(out, title, (x0 + 6, y0 + 15), _FONT, 0.40, (220, 230, 240), 1, cv2.LINE_AA)
+    left, top, right, bottom = _PLOT_PAD
+    gx0, gy0 = x0 + left, y0 + top
+    gw, gh = _PLOT_W - left - right, _PLOT_H - top - bottom
+    legend_y = y0 + _PLOT_H - 4
+    for i, (label, color) in enumerate(
+        (
+            ("bruto", _PLOT_RAW_COLOR),
+            ("filtrado", _PLOT_FILTERED_COLOR),
+            ("on", _PLOT_ON_COLOR),
+            ("off", _PLOT_OFF_COLOR),
+        )
+    ):
+        cv2.putText(out, label, (x0 + 6 + i * 62, legend_y), _FONT, 0.36, color, 1, cv2.LINE_AA)
+
+    values = np.concatenate([view.raw, view.filtered, [view.theta_on, view.theta_off]])
+    values = values[np.isfinite(values)]
+    lo, hi = float(values.min()), float(values.max())
+    pad = max(hi - lo, 1e-6) * _PLOT_SPAN_PAD
+    lo, hi = lo - pad, hi + pad
+
+    def to_y(v: NDArray[np.float64]) -> NDArray[np.float64]:
+        return gy0 + gh * (1.0 - (v - lo) / (hi - lo))
+
+    for theta, color in ((view.theta_on, _PLOT_ON_COLOR), (view.theta_off, _PLOT_OFF_COLOR)):
+        ty = round(float(to_y(np.array(theta))))
+        cv2.line(out, (gx0, ty), (gx0 + gw, ty), color, 1)
+    if view.t.size == 0:
+        return
+    t_end = float(view.t[-1])
+    xs = gx0 + (view.t - (t_end - view.window_s)) / view.window_s * gw
+    for series, color in ((view.raw, _PLOT_RAW_COLOR), (view.filtered, _PLOT_FILTERED_COLOR)):
+        for piece in _segments(xs, to_y(series)):
+            cv2.polylines(out, [piece], False, color, 1, cv2.LINE_AA)
+
+
 def handedness_label(handedness: str) -> str:
     """Texto do modo (spec 017 RF6): "Destro"/"Canhoto" e o braço que ataca (ASCII, Hershey)."""
     return _HAND_TEXT[handedness]
@@ -255,16 +392,31 @@ def render(
     handedness: str | None = None,
     *,
     mirror: bool = False,
+    level: OverlayLevel = OverlayLevel.FULL,
+    plot: SeriesView | None = None,
+    plot_name: str | None = None,
 ) -> NDArray[np.uint8]:
-    """Desenha pose, esqueleto, zona de saída, normalização M=S*R*T e telemetria no frame."""
+    """Desenha o overlay no nível ``level`` sobre uma cópia de ``img`` (O1: função pura).
+
+    ``off``: só a imagem (espelhada, se ``mirror``). ``minimal``: esqueleto, FPS, estado,
+    modo e zona de saída. ``full``: também ângulos (A7), miniquadro ``M = S·R·T``, tabela
+    de gestos e, com ``plot``, o gráfico no tempo do gesto ``plot_name``.
+    """
     out: NDArray[np.uint8] = np.array(img, dtype=np.uint8, copy=True)
+    if level is OverlayLevel.OFF:
+        return np.ascontiguousarray(cv2.flip(out, 1)) if mirror else out
 
     if result.pose is not None:
         _draw_pose_skeleton(out, result.pose)
     if mirror:
         out = np.ascontiguousarray(cv2.flip(out, 1))
+    full = level is OverlayLevel.FULL
+    if full and result.pose is not None:
+        _draw_elbow_angles(out, result.pose, mirror=mirror)
 
     fps_text = "FPS: --" if result.fps is None else f"FPS: {result.fps:.1f}"
+    if result.latency_ms is not None:
+        fps_text += f"  lat: {result.latency_ms:.0f} ms"
     cv2.putText(out, fps_text, _TEXT_ORIGIN_FPS, _FONT, _TEXT_SCALE, (255, 255, 255), 1)
     if result.exit_zone is not None:
         _draw_exit_zone(out, result.exit_zone, mirror=mirror)
@@ -275,7 +427,11 @@ def render(
         cv2.putText(out, text, _TEXT_ORIGIN_HAND, _FONT, _HAND_TEXT_SCALE, _HAND_COLOR, 1)
     if result.voice_status is not None:
         cv2.putText(out, f"Voz: {result.voice_status}", (8, 84), _FONT, 0.5, (255, 255, 255), 1)
+    if not full:
+        return out
     if result.normalized is not None:
         _draw_normalized_skeleton(out, result.normalized)
     _draw_telemetry_panel(out, result.gestures, result.pressed, result.look)
+    if plot is not None:
+        _draw_plot(out, plot, plot_name)
     return out

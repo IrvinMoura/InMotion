@@ -1051,3 +1051,89 @@ def test_step_result_exposes_normalized_skeleton_and_raw_vs_filtered_telemetry()
     assert tele.raw_value is not None
     assert tele.filtered_value is not None
     assert tele.raw_value > tele.filtered_value
+
+
+# --- Bases R7 x distância (24/11/2026): mudou de distância de vez, mede de novo ---
+
+
+def _distance_pipeline() -> tuple[Pipeline, FakeInputBackend]:
+    profile = GameProfile(
+        "teste",
+        {
+            "attack": Binding("mouse_left", GestureKind.HOLD),
+            "jump": Binding("space", GestureKind.TRIGGER),
+            "crouch": Binding("shift", GestureKind.HOLD),
+        },
+    )
+    pipeline, _, fake = build(build_body_gestures(profile.bindings), profile)
+    return pipeline, fake
+
+
+def _walk_away(i: int, near: int, arm: Arm = ARM_HANGING) -> PoseFrame:
+    """Parado perto da câmera por ``near`` frames e depois longe: ombros com metade da
+    largura e mais baixos na imagem (c = +3 larguras: agachar falso com a base antiga)."""
+    far = i >= near
+    return make_body(
+        t=i / 30,
+        scale=0.5 if far else 1.0,
+        hip_y_px=375.0 if far else 300.0,
+        right_arm=arm,
+    )
+
+
+def test_walking_away_from_the_first_position_remeasures_the_baselines() -> None:
+    pipeline, fake = _distance_pipeline()
+    for i in range(30):
+        pipeline.step(_walk_away(i, 30), i / 30)
+    for i in range(30, 60):
+        pipeline.step(_walk_away(i, 30), i / 30)
+    assert "shift" in fake.pressed  # o problema: de pé, longe, com a base de perto
+    for i in range(60, 200):  # 3 s depois da mudança (frame 30) as bases são refeitas
+        result = pipeline.step(_walk_away(i, 30), i / 30)
+    assert fake.pressed == set()
+    crouch = next(g for g in result.gestures if g.name == "crouch")
+    assert crouch.state is GestureState.IDLE
+    assert crouch.filtered_value == pytest.approx(0.0, abs=0.05)
+    assert [e for e in fake.events if e[0] == "press"].count(("press", "shift")) == 1
+
+
+def test_remeasuring_releases_held_keys_and_the_gesture_can_press_again() -> None:
+    pipeline, fake = _distance_pipeline()
+    for i in range(30):
+        pipeline.step(_walk_away(i, 30), i / 30)
+    start = len(fake.events)
+    released_at = None
+    for i in range(30, 180):
+        pipeline.step(_walk_away(i, 30, ARM_STRAIGHT_FORWARD), i / 30)
+        new = fake.events[start:]
+        if released_at is None and ("release", "mouse_left") in new:
+            released_at = i
+            assert fake.pressed == set()  # solta TUDO no mesmo frame
+    assert released_at is not None
+    assert (released_at - 30) / 30 == pytest.approx(3.0, abs=0.05)
+    assert fake.pressed == {"mouse_left"}  # o braço continua esticado: aperta de novo
+
+
+def test_short_approach_does_not_release_anything() -> None:
+    pipeline, fake = _distance_pipeline()
+    for i in range(60):
+        pipeline.step(make_body(t=i / 30, right_arm=ARM_STRAIGHT_FORWARD), i / 30)
+    assert fake.pressed == {"mouse_left"}
+    before = len(fake.events)
+    for i in range(60, 120):  # 2 s perto da câmera (quadril no mesmo lugar) e volta
+        pipeline.step(
+            make_body(t=i / 30, scale=2.0, hip_y_px=300.0, right_arm=ARM_STRAIGHT_FORWARD), i / 30
+        )
+    for i in range(120, 150):
+        pipeline.step(make_body(t=i / 30, right_arm=ARM_STRAIGHT_FORWARD), i / 30)
+    assert ("release", "mouse_left") not in fake.events[before:]
+
+
+def test_frame_without_pose_restarts_the_distance_count() -> None:
+    """Um frame sem pose (aquém do timeout de LOST) não conta como "longe" seguido."""
+    pipeline, fake = _distance_pipeline()
+    for i in range(30):
+        pipeline.step(_walk_away(i, 30), i / 30)
+    for i in range(30, 150):  # 4 s longe, com um frame perdido aos 2 s
+        pipeline.step(None if i == 90 else _walk_away(i, 30), i / 30)
+    assert "shift" in fake.pressed  # só 2 s seguidos desde o frame perdido

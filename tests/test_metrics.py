@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from inmotion.gestures.base import EventKind, GestureEvent
-from inmotion.metrics import GestureMetrics, evaluate, match_events
+from inmotion.metrics import (
+    NO_GESTURE,
+    GestureMetrics,
+    StepExpectation,
+    confusion_counts,
+    evaluate,
+    jitter,
+    lag_frames,
+    match_events,
+    score_guided,
+)
 from inmotion.recording import LabelInterval
 from tests.test_recording import make_recording
 
@@ -122,3 +133,97 @@ def test_tp_plus_fn_equals_labels(
     assert m.tp + m.fp == len(events)
     assert len(m.latencies_s) == m.tp
     assert 0.0 <= m.negative_s <= duration
+
+
+# --- Spec 011 T7: sessões guiadas (contagem de repetições por passo) ---
+
+
+GUIDED = {
+    "rest": StepExpectation(None, 0),
+    "punch": StepExpectation("attack", 3),
+    "march": StepExpectation("walk", 1, at_least=True),
+    "sprint": StepExpectation("sprint", 1, at_least=True, allow=("walk",)),
+}
+STEPS = (
+    LabelInterval("rest", 0.0, 10.0),
+    LabelInterval("punch", 12.0, 20.0),
+    LabelInterval("march", 22.0, 30.0),
+    LabelInterval("sprint", 32.0, 40.0),
+    LabelInterval("setup_desconhecido", 41.0, 50.0),
+)
+
+
+def test_guided_counts_repetitions_and_negatives() -> None:
+    presses = [
+        (5.0, "attack"),  # FP no parado
+        (12.5, "attack"),
+        (14.0, "attack"),  # 2 de 3 socos → TP 2, FN 1
+        (20.4, "attack"),  # na folga do passo de socos: ainda TP, não FP
+        (21.0, "walk"),  # entre passos (preparação): não conta
+        (23.0, "walk"),
+        (25.0, "walk"),  # marcha at_least: 1 TP, o segundo w não é FP
+        (33.0, "walk"),  # andar é permitido no correr
+        (45.0, "jump"),  # fora dos passos conhecidos: não conta
+    ]
+    m = score_guided(STEPS, GUIDED, presses, grace_s=0.6)
+    attack = m["attack"]
+    assert (attack.tp, attack.fn, attack.fp) == (3, 0, 1)
+    assert attack.latencies_s == pytest.approx((0.5,))
+    assert attack.negative_s == pytest.approx(10.0 + 8.0 + 8.0)  # rest, march, sprint
+    assert attack.fp_per_min == pytest.approx(1 / (26.0 / 60.0))
+    walk = m["walk"]
+    assert (walk.tp, walk.fn, walk.fp) == (1, 0, 0)
+    assert walk.negative_s == pytest.approx(10.0 + 8.0)  # o correr permite andar
+    sprint = m["sprint"]
+    assert (sprint.tp, sprint.fn, sprint.fp) == (0, 1, 0)
+    assert sprint.recall == 0.0
+    assert m["jump"].tp + m["jump"].fp + m["jump"].fn == 0
+
+
+def test_guided_extra_repetitions_are_false_positives() -> None:
+    presses = [(13.0 + i, "attack") for i in range(5)]
+    attack = score_guided(STEPS, GUIDED, presses)["attack"]
+    assert (attack.tp, attack.fn, attack.fp) == (3, 0, 2)
+    assert attack.precision == pytest.approx(3 / 5)
+
+
+def test_guided_press_in_grace_is_not_counted_twice() -> None:
+    labels = (LabelInterval("punch", 0.0, 5.0), LabelInterval("rest", 5.0, 10.0))
+    attack = score_guided(labels, GUIDED, [(1.0, "attack"), (5.3, "attack")], grace_s=0.6)["attack"]
+    assert (attack.tp, attack.fp) == (2, 0)
+
+
+def test_step_expectation_validation() -> None:
+    with pytest.raises(ValueError, match="expected"):
+        StepExpectation("attack", -1)
+    with pytest.raises(ValueError, match="parado"):
+        StepExpectation(None, 2)
+
+
+def test_confusion_counts_by_requested_and_fired_gesture() -> None:
+    presses = [(5.0, "attack"), (13.0, "attack"), (14.0, "jump"), (35.0, "walk"), (45.0, "x")]
+    counts = confusion_counts(STEPS, GUIDED, presses)
+    assert counts == {
+        (NO_GESTURE, "attack"): 1,
+        ("attack", "attack"): 1,
+        ("attack", "jump"): 1,
+        ("sprint", "walk"): 1,
+    }
+
+
+def test_jitter_is_std_of_differences() -> None:
+    assert jitter([0.0, 1.0, 0.0, 1.0, 0.0]) == pytest.approx(1.0)  # Δ = ±1
+    assert jitter([3.0, 3.0, 3.0, 3.0]) == 0.0
+    assert jitter([1.0, float("nan"), 2.0]) is None
+    assert jitter([1.0, 2.0]) is None
+
+
+def test_lag_frames_finds_known_delay() -> None:
+    t = np.arange(200)
+    raw = np.sin(t / 7.0)
+    delayed = np.concatenate([np.zeros(4), raw[:-4]])
+    assert lag_frames(raw, delayed, max_lag=15) == 4
+    assert lag_frames(raw, raw, max_lag=15) == 0
+    assert lag_frames(np.ones(50), np.ones(50), max_lag=5) is None
+    with pytest.raises(ValueError, match="max_lag"):
+        lag_frames(raw, raw, max_lag=-1)

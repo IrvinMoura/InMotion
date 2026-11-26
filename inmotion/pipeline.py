@@ -16,6 +16,7 @@ from inmotion.gestures.features import (
     BaselineParams,
     BodyBaseline,
     FrameContext,
+    ScaleWatch,
     build_context,
     crouch_drop,
     knee_lift,
@@ -77,6 +78,7 @@ class StepResult:
     pressed: frozenset[str] = frozenset()
     normalized: NormalizedSkeleton | None = None
     gestures: tuple[GestureTelemetry, ...] = ()
+    latency_ms: float | None = None  # spec 009: captura → fim do step (input já enviado)
     voice_status: str | None = None
 
 
@@ -117,6 +119,7 @@ class Pipeline:
             BodyBaseline(baseline_params or BaselineParams()),
         )
         self._lean_baseline = BodyBaseline(baseline_params or BaselineParams())  # spec 019
+        self._scale_watch = ScaleWatch(baseline_params or BaselineParams())
         self._march = MarchTracker(march_params or MarchParams())  # spec 018
         self._head_look_params = head_look  # spec 014: None = sem câmera pela cabeça
         self._head_look = HeadLook(head_look) if head_look is not None else None
@@ -156,6 +159,9 @@ class Pipeline:
         zerado antes do primeiro ``update``, pois o ``release_all()`` já soltou as teclas
         que eles achavam apertadas. Fora de ACTIVE o mapper esquece os taps pendentes; em
         ACTIVE sem pose válida ele ainda solta os taps vencidos por tempo.
+
+        Mudança de distância (``ScaleWatch``): ao fim do frame em que as bases R7 deixam de
+        valer, solta todo o input e zera o mesmo estado; as bases são medidas de novo.
         """
         raw = pose
         generation = self._safety.generation
@@ -199,9 +205,14 @@ class Pipeline:
         display_pose = raw if pose is None else pose
         if active and pose is not None:
             events, look, normalized, gestures = self._run_gestures(pose, t, unfiltered)
+            s = normalized.shoulder_px if normalized is not None else None
+            if self._scale_watch.update(s, t, has_base=self._baseline.value is not None):
+                self._safety.input.release_all()
+                self._reset_all()
         else:
             if active:
                 self._mapper.update(t)
+                self._scale_watch.update(None, t, has_base=self._baseline.value is not None)
                 if self._head_look is not None:
                     self._head_look.update(None, t)  # RF6: zera o resto, sem Δt na volta
             normalized = (
@@ -262,6 +273,7 @@ class Pipeline:
         for knee_baseline in self._knee_baselines:
             knee_baseline.reset()
         self._lean_baseline.reset()
+        self._scale_watch.reset()
         self._march.reset()
         if self._head_look is not None:
             self._head_look.reset()  # RF2: o neutro é medido de novo a cada volta a ACTIVE

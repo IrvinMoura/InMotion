@@ -41,11 +41,16 @@ _LEG: dict[Side, tuple[PoseLandmark, PoseLandmark]] = {
 @dataclass(frozen=True)
 class BaselineParams:
     """Parâmetros da base R7: ``K`` frames iniciais, taxa ``λ`` da EMA lenta (por frame) e
-    ``rest_band``: desvio máximo ``|h − b|/s`` (larguras de ombro) para a base andar."""
+    ``rest_band``: desvio máximo ``|h − b|/s`` (larguras de ombro) para a base andar.
+
+    ``scale_band`` e ``scale_hold_s`` (``ScaleWatch``): as bases são medidas de novo quando
+    ``|ln(s/s₀)| ≥ scale_band`` por ``scale_hold_s`` segundos seguidos (``None`` desliga)."""
 
     init_frames: int = 15
     rate: float = 0.02
     rest_band: float = 0.15
+    scale_band: float | None = 0.5
+    scale_hold_s: float = 3.0
 
     def __post_init__(self) -> None:
         if self.init_frames < 1:
@@ -54,6 +59,12 @@ class BaselineParams:
             raise ValueError("rate deve estar em (0, 1]")
         if not (math.isfinite(self.rest_band) and self.rest_band > 0.0):
             raise ValueError("rest_band deve ser finito e > 0")
+        if self.scale_band is not None and not (
+            math.isfinite(self.scale_band) and self.scale_band > 0.0
+        ):
+            raise ValueError("scale_band deve ser None ou finito e > 0")
+        if not (math.isfinite(self.scale_hold_s) and self.scale_hold_s > 0.0):
+            raise ValueError("scale_hold_s deve ser finito e > 0")
 
 
 class BodyBaseline:
@@ -113,6 +124,50 @@ class BodyBaseline:
         """Esquece a base e as amostras (volta a precisar de ``K`` frames de repouso)."""
         self._samples.clear()
         self._value = None
+
+
+class ScaleWatch:
+    """Detecta que a pessoa mudou de distância de vez, o que invalida as bases R7 em pixels.
+
+    As bases são alturas em pixels e só valem perto da distância em que foram medidas; com a
+    pessoa longe dali o portão ``rest_band`` não as deixa corrigir (sessão guiada
+    20261101-011530). A largura dos ombros ``s`` (A6) mede a distância: com ``s₀`` a largura
+    no frame em que a base apareceu, ``update`` devolve ``True`` quando
+
+    ``|ln(s/s₀)| ≥ scale_band`` em todos os frames por ``scale_hold_s`` segundos.
+
+    O logaritmo trata aproximar e afastar igual. A duração descarta o que estreita os ombros
+    por pouco tempo (girar no soco, agachar). Frame sem ``s`` válido recomeça a contagem.
+    """
+
+    def __init__(self, params: BaselineParams) -> None:
+        self._params = params
+        self._reference: float | None = None
+        self._since: float | None = None
+
+    def update(self, s: float | None, t: float, *, has_base: bool) -> bool:
+        """Processa a largura dos ombros do frame (px); ``True`` = as bases não valem mais."""
+        band = self._params.scale_band
+        if not has_base:
+            self.reset()
+            return False
+        if band is None or s is None or not (math.isfinite(s) and s > 0.0):
+            self._since = None
+            return False
+        if self._reference is None:
+            self._reference = s
+            return False
+        if abs(math.log(s / self._reference)) < band:
+            self._since = None
+            return False
+        if self._since is None:
+            self._since = t
+        return t - self._since >= self._params.scale_hold_s
+
+    def reset(self) -> None:
+        """Esquece a referência e a contagem (a próxima base define outra referência)."""
+        self._reference = None
+        self._since = None
 
 
 @dataclass(frozen=True)

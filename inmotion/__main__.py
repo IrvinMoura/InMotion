@@ -141,6 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from inmotion.gestures.factory import BODY_GESTURE_NAMES
     from inmotion.input.hotkeys import WindowsHotkeys
     from inmotion.input.keyboard_mouse import KeyboardMouseBackend
+    from inmotion.overlay import OverlayLevel
     from inmotion.session import DEFAULT_PROFILE
     from inmotion.vision.pose import MediaPipePoseEstimator, ModelNotFoundError
     from inmotion.vision.preprocess import Preprocessor
@@ -188,6 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         _log.info("Câmera aberta: %dx%d a %.0f FPS", *camera.actual)
 
+        preprocessor = Preprocessor(config.preprocess)
         deps = AppDeps(
             source=camera,
             estimator=estimator,
@@ -195,14 +197,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             hotkeys=hotkeys,
             clock=clock,
             display=(
-                OpenCvDisplay(handedness=config.handedness, mirror=config.overlay.mirror)
+                OpenCvDisplay(
+                    handedness=config.handedness,
+                    mirror=config.overlay.mirror,
+                    level=OverlayLevel(config.overlay.level),
+                    plot_gesture=config.overlay.plot_gesture,
+                    history_s=config.overlay.history_s,
+                    sobel=preprocessor.sobel_view,
+                    sobel_on=config.preprocess.sobel_debug,
+                )
                 if config.overlay.enabled
                 else None
             ),
             pose_filter=pose_filter_from_config(config.filters),
             exit_zone=config.exit_zone,
             config=config,
-            preprocess=Preprocessor(config.preprocess).apply,
+            preprocess=preprocessor.apply,
             profile=profile,
         )
         if config.voice.enabled:
