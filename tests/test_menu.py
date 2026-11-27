@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pytest
 
 from inmotion.__main__ import build_parser, resolve_config
 from inmotion.menu.choices import MenuChoices, load_choices, reconcile, save_choices
@@ -20,9 +19,6 @@ from inmotion.menu.devices import (
 )
 from inmotion.menu.launch import play
 from tests.fakes import FakeCapture
-
-NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spec 024 T1")
-
 
 # --- CA1: escolhas viram os mesmos argumentos da linha de comando ---
 
@@ -122,7 +118,6 @@ def test_probe_cameras_keeps_only_indices_that_deliver_a_frame() -> None:
 # --- CA4: Jogar; erro do app vira mensagem ---
 
 
-@NOT_YET
 def test_play_runs_the_app_with_the_choices_and_a_log_file() -> None:
     seen: list[Sequence[str]] = []
 
@@ -136,7 +131,6 @@ def test_play_runs_the_app_with_the_choices_and_a_log_file() -> None:
     assert "--log-file" in seen[0]  # sem terminal, o log vai para logs/
 
 
-@NOT_YET
 def test_play_turns_an_app_error_into_a_message() -> None:
     def failing_main(argv: Sequence[str]) -> int:
         logging.getLogger("inmotion").error("Falha ao abrir a câmera: ocupada")
@@ -147,7 +141,6 @@ def test_play_turns_an_app_error_into_a_message() -> None:
     assert result.error == "Falha ao abrir a câmera: ocupada"
 
 
-@NOT_YET
 def test_play_turns_an_exception_into_a_message() -> None:
     def crashing_main(argv: Sequence[str]) -> int:
         raise OSError("disco cheio")
@@ -156,3 +149,16 @@ def test_play_turns_an_exception_into_a_message() -> None:
     assert result.code == 1
     assert result.error is not None
     assert "disco cheio" in result.error
+
+
+def test_ppm_bytes_resizes_and_converts_bgr_to_rgb() -> None:
+    """A miniatura vira PPM (P6) que o ``tk.PhotoImage`` lê sem Pillow."""
+    from inmotion.menu.window import ppm_bytes
+
+    image = np.zeros((48, 64, 3), dtype=np.uint8)
+    image[:, :] = (255, 0, 0)  # azul em BGR
+    data = ppm_bytes(image, (8, 6))
+    header = b"P6 8 6 255 "
+    assert data.startswith(header)
+    pixels = np.frombuffer(data[len(header) :], dtype=np.uint8).reshape(6, 8, 3)
+    assert (pixels == (0, 0, 255)).all()  # azul em RGB
