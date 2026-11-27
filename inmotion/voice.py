@@ -25,11 +25,11 @@ class VoiceConfig:
     model_dir: Path = Path("models/vosk-model-small-pt-0.3")
     device: int | None = None
     min_confidence: float = 0.90
-    inventory: str = "jogo inventário"
-    menu: str = "jogo menu"
-    back: str = "jogo voltar"
-    pause: str = "controle pausar"
-    resume: str = "controle continuar"
+    inventory: str = "abrir inventário"
+    menu: str = "abrir menu"
+    back: str = "voltar"
+    pause: str = "pausar controle"
+    resume: str = "continuar controle"
     inventory_key: str = "e"
     menu_key: str = "esc"
 
@@ -71,17 +71,24 @@ class VoiceReception:
 
     ``level``: nível do último bloco de áudio, em ``[0, 1]`` (``level_from_rms``).
     ``heard``: última frase fechada pelo reconhecedor (``"[unk]"`` = fora do vocabulário),
-    ``heard_t`` o instante dela e ``accepted`` se virou comando.
+    ``heard_t`` o instante dela e ``accepted`` se virou comando. ``confidence`` é a menor
+    confiança entre as palavras da frase e ``threshold`` o ``min_confidence`` exigido.
     """
 
     level: float
     heard: str | None = None
     heard_t: float | None = None
     accepted: bool = False
+    confidence: float | None = None
+    threshold: float | None = None
 
     def __post_init__(self) -> None:
         if not (isfinite(self.level) and 0.0 <= self.level <= 1.0):
             raise ValueError(f"level deve estar em [0, 1], recebido {self.level}")
+        for name in ("confidence", "threshold"):
+            value = getattr(self, name)
+            if value is not None and not (isfinite(value) and 0.0 <= value <= 1.0):
+                raise ValueError(f"{name} deve estar em [0, 1], recebido {value}")
 
 
 class VoiceSource(Protocol):

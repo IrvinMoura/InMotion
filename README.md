@@ -127,11 +127,11 @@ Com a janela do Minecraft em foco e o personagem no mundo, diga uma frase inteir
 
 | Frase | Efeito com as teclas padrão |
 |-------|-----------------------------|
-| **Jogo inventário** | Solta os controles de movimento e abre o inventário com `E`. |
-| **Jogo menu** | Abre o menu do jogo com `Esc`. |
-| **Jogo voltar** | Fecha o inventário ou menu aberto por voz com `Esc` e libera os gestos. |
-| **Controle pausar** | Suspende os gestos do InMotion e solta as entradas ativas. |
-| **Controle continuar** | Retoma o InMotion. Se houver um menu aberto, diga **jogo voltar**. |
+| **Abrir inventário** | Solta os controles de movimento e abre o inventário com `E`. |
+| **Abrir menu** | Abre o menu do jogo com `Esc`. |
+| **Voltar** | Fecha o inventário ou menu aberto por voz com `Esc` e libera os gestos. |
+| **Pausar controle** | Suspende os gestos do InMotion e solta as entradas ativas. |
+| **Continuar controle** | Retoma o InMotion. Se houver um menu aberto, diga **voltar**. |
 
 Para instalar a voz em outro computador, execute na raiz do projeto, no PowerShell. O download só é necessário na primeira instalação. [Modelo oficial de português do Vosk](https://alphacephei.com/vosk/models)
 
@@ -148,7 +148,7 @@ Para iniciar com o microfone padrão do Windows, use
 .\.venv\Scripts\python.exe -m inmotion --game minecraft --voice
 ```
 
-O overlay mostra `Voz:` com o menu aberto (ou `ouvindo`) e uma barra com o nível do microfone; se a barra não se mexe quando você fala, o InMotion está ouvindo o dispositivo errado. Logo abaixo aparece por 3 s a última frase reconhecida: verde quando virou comando, laranja quando foi ignorada (confiança baixa) e "frase desconhecida" quando não está no vocabulário. Para testar, dê um passo até aparecer `W`, diga **jogo inventário** e confira se o personagem para. Diga **jogo voltar** e marche de novo. Repita com **jogo menu**. Com o inventário aberto, use o mouse físico para navegar.
+O overlay mostra `Voz:` com o menu aberto (ou `ouvindo`) e uma barra com o nível do microfone; se a barra não se mexe quando você fala, o InMotion está ouvindo o dispositivo errado. Logo abaixo aparece por 3 s a última frase reconhecida: verde quando virou comando, laranja quando foi ignorada. O número é a confiança da palavra mais fraca (de 0 a 1); a frase só vira comando com todas as palavras em `voice.min_confidence` (0,90) ou mais, e a tela mostra a comparação quando reprova, por exemplo `(ignorado: 0,82 < 0,90)` e "frase desconhecida" quando não está no vocabulário. Para testar, dê um passo até aparecer `W`, diga **abrir inventário** e confira se o personagem para. Diga **voltar** e marche de novo. Repita com **abrir menu**. Com o inventário aberto, use o mouse físico para navegar.
 
 Se fechar a tela manualmente, aperte `F8` para pausar o controlador, volte ao mundo do jogo e aperte `F8` de novo. O InMotion acompanha os comandos enviados e não lê a tela do Minecraft.
 

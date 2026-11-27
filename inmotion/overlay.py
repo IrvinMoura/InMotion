@@ -392,12 +392,32 @@ def _draw_plot(out: NDArray[np.uint8], view: SeriesView, name: str | None) -> No
             cv2.polylines(out, [piece], False, color, 1, cv2.LINE_AA)
 
 
-def voice_heard_label(heard: str, *, accepted: bool) -> str:
-    """Texto da última frase ouvida, em ASCII (a fonte Hershey não desenha acentos)."""
+def _decimal(value: float) -> str:
+    return f"{value:.2f}".replace(".", ",")
+
+
+def voice_heard_label(
+    heard: str,
+    *,
+    accepted: bool,
+    confidence: float | None = None,
+    threshold: float | None = None,
+) -> str:
+    """Texto da última frase ouvida, em ASCII (a fonte Hershey não desenha acentos).
+
+    Com ``confidence`` (a palavra mais fraca) mostra o número; se a frase foi ignorada e há
+    ``threshold``, mostra a comparação que a reprovou (``0,82 < 0,90``).
+    """
     if heard == "[unk]":
         return "ouvi: frase desconhecida"
     text = unicodedata.normalize("NFKD", heard).encode("ascii", "ignore").decode("ascii")
-    return f'ouvi: "{text}"' + ("" if accepted else " (ignorado)")
+    label = f'ouvi: "{text}"'
+    if confidence is None:
+        return label + ("" if accepted else " (ignorado)")
+    if accepted:
+        return label + f" ({_decimal(confidence)})"
+    limit = "" if threshold is None else f" < {_decimal(threshold)}"
+    return label + f" (ignorado: {_decimal(confidence)}{limit})"
 
 
 def _draw_voice(out: NDArray[np.uint8], result: StepResult) -> None:
@@ -418,7 +438,9 @@ def _draw_voice(out: NDArray[np.uint8], result: StepResult) -> None:
     if rec.heard is None or rec.heard_t is None or result.t - rec.heard_t > _HEARD_SHOW_S:
         return
     color = _HEARD_OK_COLOR if rec.accepted else _HEARD_IGNORED_COLOR
-    label = voice_heard_label(rec.heard, accepted=rec.accepted)
+    label = voice_heard_label(
+        rec.heard, accepted=rec.accepted, confidence=rec.confidence, threshold=rec.threshold
+    )
     cv2.putText(out, label, _TEXT_ORIGIN_HEARD, _FONT, _VOICE_TEXT_SCALE, color, 1)
 
 

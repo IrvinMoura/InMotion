@@ -179,10 +179,10 @@ voice:
   model_dir: models/vosk-model-small-pt-0.3
   device: null
   min_confidence: 0.90   # confiança mínima por palavra
-  inventory: jogo inventário
-  menu: jogo menu
-  back: jogo voltar
-  pause: controle pausar
-  resume: controle continuar
+  inventory: abrir inventário
+  menu: abrir menu
+  back: voltar
+  pause: pausar controle
+  resume: continuar controle
   inventory_key: e
   menu_key: esc

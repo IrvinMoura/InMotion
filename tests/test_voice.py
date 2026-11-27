@@ -28,7 +28,7 @@ def test_voice_is_optional_and_configurable() -> None:
     assert voice.enabled
     assert voice.vocabulary["abrir menu"] is VoiceCommand.MENU
     with pytest.raises(ConfigError, match="distintas"):
-        resolve_config(parser.parse_args(["--set", "voice.menu=jogo voltar"]))
+        resolve_config(parser.parse_args(["--set", "voice.menu=voltar"]))
 
 
 def test_menu_requires_tracking_and_obeys_pause_and_watchdog() -> None:
@@ -102,7 +102,7 @@ def test_audio_worker_only_delivers_recent_complete_commands(
 
         def Result(self) -> str:  # noqa: N802
             if self.phrase == "incerta":
-                return json.dumps({"text": "jogo menu", "result": [{"conf": 1.0}, {"conf": 0.6}]})
+                return json.dumps({"text": "abrir menu", "result": [{"conf": 1.0}, {"conf": 0.6}]})
             return json.dumps({"text": self.phrase, "result": [{"conf": 1.0}]})
 
     stream = None
@@ -132,13 +132,13 @@ def test_audio_worker_only_delivers_recent_complete_commands(
         assert processed.wait(2)
 
     try:
-        deliver("jogo menu")
+        deliver("abrir menu")
         assert source.poll() is VoiceCommand.MENU
         assert source.poll() is None
         for phrase in ("parcial", "qualquer frase", "menu", "incerta"):
             deliver(phrase)
             assert source.poll() is None
-        deliver("jogo voltar")
+        deliver("voltar")
         clock.advance(1)
         assert source.poll() is None
     finally:
@@ -228,8 +228,8 @@ def test_reception_reports_level_and_last_phrase(
 
     loud = np.full(1600, 16384, dtype=np.int16).tobytes()  # −6 dBFS
     results = {
-        loud: {"text": "jogo menu", "result": [{"conf": 1.0}, {"conf": 1.0}]},
-        b"duvida": {"text": "jogo voltar", "result": [{"conf": 1.0}, {"conf": 0.5}]},
+        loud: {"text": "abrir menu", "result": [{"conf": 1.0}, {"conf": 0.97}]},
+        b"duvida": {"text": "abrir inventário", "result": [{"conf": 1.0}, {"conf": 0.82}]},
         b"ruido": {"text": "[unk]", "result": [{"conf": 1.0}]},
     }
     source, stream, clock, processed = _scripted_microphone(tmp_path, monkeypatch, results)
@@ -246,15 +246,36 @@ def test_reception_reports_level_and_last_phrase(
         assert source.reception().level == pytest.approx(level_from_rms(16384.0))
         deliver(loud)
         rec = source.reception()
-        assert (rec.heard, rec.heard_t, rec.accepted) == ("jogo menu", 0.0, True)
+        assert (rec.heard, rec.heard_t, rec.accepted) == ("abrir menu", 0.0, True)
+        assert (rec.confidence, rec.threshold) == (0.97, 0.90)  # a palavra mais fraca
         assert source.poll() is VoiceCommand.MENU
         clock.advance(1.0)
         deliver(b"duvida")  # frase do vocabulário com confiança baixa: ouvida, mas ignorada
         rec = source.reception()
-        assert (rec.heard, rec.heard_t, rec.accepted) == ("jogo voltar", 1.0, False)
+        assert (rec.heard, rec.heard_t, rec.accepted) == ("abrir inventário", 1.0, False)
+        assert rec.confidence == 0.82
         assert source.poll() is None
         deliver(b"ruido")  # fora do vocabulário
         assert source.reception().heard == "[unk]"
         assert source.reception().accepted is False
     finally:
         source.close()
+
+
+def test_default_phrases() -> None:
+    """Frases pedidas pelo usuário em 27/11/2026 (minúsculas: é como o Vosk devolve o texto)."""
+    vocabulary = VoiceConfig().vocabulary
+    assert vocabulary == {
+        "abrir inventário": VoiceCommand.INVENTORY,
+        "abrir menu": VoiceCommand.MENU,
+        "voltar": VoiceCommand.BACK,
+        "pausar controle": VoiceCommand.PAUSE,
+        "continuar controle": VoiceCommand.RESUME,
+    }
+
+
+def test_reception_validates_confidence() -> None:
+    assert VoiceReception(0.5, "voltar", 1.0, True, 0.95, 0.9).confidence == 0.95
+    for bad in (-0.1, 1.1, float("nan")):
+        with pytest.raises(ValueError, match="confidence"):
+            VoiceReception(0.5, "voltar", 1.0, True, bad, 0.9)

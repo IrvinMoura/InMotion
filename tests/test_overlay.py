@@ -385,16 +385,16 @@ def test_voice_meter_grows_with_the_level() -> None:
 def test_voice_shows_recent_phrase_and_hides_old_one() -> None:
     from inmotion.overlay import OverlayLevel
 
-    heard = render(_black(), _voice_result(0.2, "jogo inventário", 9.0, True))
-    ignored = render(_black(), _voice_result(0.2, "jogo inventário", 9.0, False))
-    old = render(_black(), _voice_result(0.2, "jogo inventário", 1.0, True))
+    heard = render(_black(), _voice_result(0.2, "abrir inventário", 9.0, True))
+    ignored = render(_black(), _voice_result(0.2, "abrir inventário", 9.0, False))
+    old = render(_black(), _voice_result(0.2, "abrir inventário", 1.0, True))
     nothing = render(_black(), _voice_result(0.2))
     assert heard[VOICE_HEARD].any()
     assert not np.array_equal(heard[VOICE_HEARD], ignored[VOICE_HEARD])  # cor diferente
     assert not old[VOICE_HEARD].any()
     assert not nothing[VOICE_HEARD].any()
     minimal = render(
-        _black(), _voice_result(0.2, "jogo menu", 9.0, True), level=OverlayLevel.MINIMAL
+        _black(), _voice_result(0.2, "abrir menu", 9.0, True), level=OverlayLevel.MINIMAL
     )
     assert minimal[VOICE_HEARD].any()  # o indicador também aparece no nível minimal
 
@@ -409,6 +409,11 @@ def test_no_voice_means_no_indicator() -> None:
 def test_voice_text_is_ascii() -> None:
     from inmotion.overlay import voice_heard_label
 
-    assert voice_heard_label("jogo inventário", accepted=True) == 'ouvi: "jogo inventario"'
-    assert voice_heard_label("jogo menu", accepted=False) == 'ouvi: "jogo menu" (ignorado)'
+    assert voice_heard_label("abrir inventário", accepted=True) == 'ouvi: "abrir inventario"'
+    assert voice_heard_label("abrir menu", accepted=False) == 'ouvi: "abrir menu" (ignorado)'
+    # Com a confiança da palavra mais fraca (27/11): ajuda a escolher voice.min_confidence.
+    ok = voice_heard_label("abrir menu", accepted=True, confidence=0.97, threshold=0.9)
+    assert ok == 'ouvi: "abrir menu" (0,97)'
+    low = voice_heard_label("voltar", accepted=False, confidence=0.824, threshold=0.9)
+    assert low == 'ouvi: "voltar" (ignorado: 0,82 < 0,90)'
     assert voice_heard_label("[unk]", accepted=False) == "ouvi: frase desconhecida"

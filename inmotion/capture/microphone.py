@@ -47,7 +47,7 @@ class MicrophoneCommands:
         self._stop = threading.Event()
         self._error: Exception | None = None
         self._level = 0.0  # escrito pela thread do áudio; leitura de um float é atômica
-        self._heard: tuple[str, float, bool] | None = None
+        self._heard: tuple[str, float, bool, float | None] | None = None
         self._worker = threading.Thread(target=self._listen, name="vosk", daemon=True)
         self._stream = audio.RawInputStream(
             device=config.device,
@@ -99,7 +99,8 @@ class MicrophoneCommands:
                         self._commands.append((t, command))
                     text = result.get("text", "")
                     if text:
-                        self._heard = (text, t, accepted)
+                        weakest = min((float(w["conf"]) for w in words), default=None)
+                        self._heard = (text, t, accepted, weakest)
         except Exception as exc:
             self._error = exc
 
@@ -117,7 +118,8 @@ class MicrophoneCommands:
         heard = self._heard
         if heard is None:
             return VoiceReception(self._level)
-        return VoiceReception(self._level, heard[0], heard[1], heard[2])
+        text, t, accepted, weakest = heard
+        return VoiceReception(self._level, text, t, accepted, weakest, self._min_confidence)
 
     def close(self) -> None:
         self._stop.set()

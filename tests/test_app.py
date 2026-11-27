@@ -666,7 +666,7 @@ def test_voice_reception_reaches_the_display() -> None:
 
         def reception(self) -> VoiceReception:
             self.n += 1
-            return VoiceReception(min(1.0, self.n / 10), "jogo menu", 0.05, True)
+            return VoiceReception(min(1.0, self.n / 10), "abrir menu", 0.05, True)
 
         def close(self) -> None:
             pass
@@ -679,7 +679,7 @@ def test_voice_reception_reaches_the_display() -> None:
     run(deps, NO_PERSISTENCE, max_frames=3)
     voices = [r.voice for r in display.results]  # type: ignore[attr-defined]
     assert [v.level for v in voices] == pytest.approx([0.1, 0.2, 0.3])
-    assert all(v.heard == "jogo menu" and v.accepted for v in voices)
+    assert all(v.heard == "abrir menu" and v.accepted for v in voices)
 
 
 def test_without_voice_the_result_has_no_reception() -> None:
