@@ -27,7 +27,6 @@ NOT_YET = pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="spe
 # --- CA1: escolhas viram os mesmos argumentos da linha de comando ---
 
 
-@NOT_YET
 def test_choices_become_cli_arguments() -> None:
     choices = MenuChoices(game="minecraft", camera=3, microphone=2, handedness="left")
     config, profile = resolve_config(build_parser().parse_args(choices.to_argv()))
@@ -38,7 +37,6 @@ def test_choices_become_cli_arguments() -> None:
     assert config.handedness == "left"
 
 
-@NOT_YET
 def test_no_microphone_means_no_voice_and_no_camera_keeps_default() -> None:
     config, _ = resolve_config(build_parser().parse_args(MenuChoices().to_argv()))
     default, _ = resolve_config(build_parser().parse_args([]))
@@ -49,7 +47,6 @@ def test_no_microphone_means_no_voice_and_no_camera_keeps_default() -> None:
 # --- CA2: escolhas salvas e dispositivos que sumiram ---
 
 
-@NOT_YET
 def test_choices_round_trip_and_bad_file_falls_back(tmp_path: Path) -> None:
     path = tmp_path / "menu.yaml"
     assert load_choices(path) == MenuChoices()  # sem arquivo
@@ -62,7 +59,6 @@ def test_choices_round_trip_and_bad_file_falls_back(tmp_path: Path) -> None:
     assert load_choices(path) == MenuChoices()
 
 
-@NOT_YET
 def test_reconcile_replaces_missing_devices_with_a_warning() -> None:
     saved = MenuChoices(game="sumiu", camera=4, microphone=7)
     fixed, warnings = reconcile(saved, cameras=[0, 1], microphones=[2, 9], games=["minecraft"])
