@@ -416,4 +416,10 @@ def test_voice_text_is_ascii() -> None:
     assert ok == 'ouvi: "abrir menu" (0,97)'
     low = voice_heard_label("voltar", accepted=False, confidence=0.824, threshold=0.9)
     assert low == 'ouvi: "voltar" (ignorado: 0,82 < 0,90)'
+    # Palavra solta do vocabulário (dados de 27/11): o motivo é a frase incompleta, não a
+    # confiança, mesmo com confiança alta.
+    part = voice_heard_label(
+        "pausar", accepted=False, confidence=0.95, threshold=0.9, in_vocabulary=False
+    )
+    assert part == 'ouvi: "pausar" (frase incompleta)'
     assert voice_heard_label("[unk]", accepted=False) == "ouvi: frase desconhecida"

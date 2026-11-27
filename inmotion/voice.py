@@ -73,6 +73,8 @@ class VoiceReception:
     ``heard``: última frase fechada pelo reconhecedor (``"[unk]"`` = fora do vocabulário),
     ``heard_t`` o instante dela e ``accepted`` se virou comando. ``confidence`` é a menor
     confiança entre as palavras da frase e ``threshold`` o ``min_confidence`` exigido.
+    ``in_vocabulary`` diz se a frase é um comando; ``False`` = palavra(s) solta(s) do
+    vocabulário, como "pausar" sem "controle", que nunca vira comando.
     """
 
     level: float
@@ -81,6 +83,7 @@ class VoiceReception:
     accepted: bool = False
     confidence: float | None = None
     threshold: float | None = None
+    in_vocabulary: bool = True  # False: o reconhecedor fechou só parte de uma frase
 
     def __post_init__(self) -> None:
         if not (isfinite(self.level) and 0.0 <= self.level <= 1.0):

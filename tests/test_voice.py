@@ -294,6 +294,7 @@ def test_each_closed_phrase_is_logged_with_confidence_and_peak(
         loud: {"text": "abrir menu", "result": [{"conf": 1.0}, {"conf": 0.97}]},
         b"duvida": {"text": "voltar", "result": [{"conf": 0.62}]},
         b"ruido": {"text": "[unk]", "result": [{"conf": 1.0}]},
+        b"meia": {"text": "pausar", "result": [{"conf": 0.95}]},
     }
     source, stream, _, processed = _scripted_microphone(tmp_path, monkeypatch, results)
 
@@ -308,16 +309,24 @@ def test_each_closed_phrase_is_logged_with_confidence_and_peak(
         deliver(loud)
         deliver(b"duvida")
         deliver(b"ruido")
+        deliver(b"meia")
+        rec = source.reception()
+        assert (rec.heard, rec.accepted, rec.in_vocabulary) == ("pausar", False, False)
     finally:
         source.close()
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("voz:")]
     # Nos blocos falsos o texto vira amostras int16; o pico de uma frase é o maior nível
     # desde a frase anterior (inclui o bloco "fim" que separa as frases).
     level = microphone.MicrophoneCommands._block_level
-    peaks = [level(loud), max(level(b"fim"), level(b"duvida")), max(level(b"fim"), level(b"ruido"))]
+    peaks = [level(loud)] + [max(level(b"fim"), level(b)) for b in (b"duvida", b"ruido", b"meia")]
     assert lines == [
-        f'voz: frase="abrir menu" confianca=0.97 palavras=1.00,0.97 aceita=sim pico={peaks[0]:.2f}',
-        f'voz: frase="voltar" confianca=0.62 palavras=0.62 aceita=nao pico={peaks[1]:.2f}',
-        f'voz: frase="[unk]" confianca=1.00 palavras=1.00 aceita=nao pico={peaks[2]:.2f}',
+        f'voz: frase="abrir menu" confianca=0.97 palavras=1.00,0.97 aceita=sim pico={peaks[0]:.2f}'
+        " vocabulario=sim",
+        f'voz: frase="voltar" confianca=0.62 palavras=0.62 aceita=nao pico={peaks[1]:.2f}'
+        " vocabulario=sim",
+        f'voz: frase="[unk]" confianca=1.00 palavras=1.00 aceita=nao pico={peaks[2]:.2f}'
+        " vocabulario=nao",
+        f'voz: frase="pausar" confianca=0.95 palavras=0.95 aceita=nao pico={peaks[3]:.2f}'
+        " vocabulario=nao",
     ]
     assert peaks[0] == pytest.approx(level_from_rms(16384.0))

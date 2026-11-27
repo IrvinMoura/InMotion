@@ -402,16 +402,20 @@ def voice_heard_label(
     accepted: bool,
     confidence: float | None = None,
     threshold: float | None = None,
+    in_vocabulary: bool = True,
 ) -> str:
     """Texto da última frase ouvida, em ASCII (a fonte Hershey não desenha acentos).
 
     Com ``confidence`` (a palavra mais fraca) mostra o número; se a frase foi ignorada e há
-    ``threshold``, mostra a comparação que a reprovou (``0,82 < 0,90``).
+    ``threshold``, mostra a comparação que a reprovou (``0,82 < 0,90``). Fora do
+    vocabulário (palavra solta, ``in_vocabulary=False``) o motivo é a frase incompleta.
     """
     if heard == "[unk]":
         return "ouvi: frase desconhecida"
     text = unicodedata.normalize("NFKD", heard).encode("ascii", "ignore").decode("ascii")
     label = f'ouvi: "{text}"'
+    if not in_vocabulary:
+        return label + " (frase incompleta)"
     if confidence is None:
         return label + ("" if accepted else " (ignorado)")
     if accepted:
@@ -439,7 +443,11 @@ def _draw_voice(out: NDArray[np.uint8], result: StepResult) -> None:
         return
     color = _HEARD_OK_COLOR if rec.accepted else _HEARD_IGNORED_COLOR
     label = voice_heard_label(
-        rec.heard, accepted=rec.accepted, confidence=rec.confidence, threshold=rec.threshold
+        rec.heard,
+        accepted=rec.accepted,
+        confidence=rec.confidence,
+        threshold=rec.threshold,
+        in_vocabulary=rec.in_vocabulary,
     )
     cv2.putText(out, label, _TEXT_ORIGIN_HEARD, _FONT, _VOICE_TEXT_SCALE, color, 1)
 

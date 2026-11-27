@@ -50,7 +50,7 @@ class MicrophoneCommands:
         self._error: Exception | None = None
         self._level = 0.0  # escrito pela thread do áudio; leitura de um float é atômica
         self._phrase_peak = 0.0  # maior nível desde a última frase fechada (só a thread do Vosk)
-        self._heard: tuple[str, float, bool, float | None] | None = None
+        self._heard: tuple[str, float, bool, float | None, bool] | None = None
         self._worker = threading.Thread(target=self._listen, name="vosk", daemon=True)
         self._stream = audio.RawInputStream(
             device=config.device,
@@ -102,8 +102,8 @@ class MicrophoneCommands:
                     text = result.get("text", "")
                     if text:
                         weakest = min((float(w["conf"]) for w in words), default=None)
-                        self._heard = (text, t, accepted, weakest)
-                        self._log_phrase(text, words, accepted)
+                        self._heard = (text, t, accepted, weakest, command is not None)
+                        self._log_phrase(text, words, accepted, command is not None)
                     self._phrase_peak = 0.0
         except Exception as exc:
             self._error = exc
@@ -116,17 +116,20 @@ class MicrophoneCommands:
             return 0.0
         return level_from_rms(float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))))
 
-    def _log_phrase(self, text: str, words: list[dict[str, Any]], accepted: bool) -> None:
+    def _log_phrase(
+        self, text: str, words: list[dict[str, Any]], accepted: bool, known: bool
+    ) -> None:
         """Uma linha por frase fechada, para calibrar ``min_confidence`` com dados
         (``tools.voice_report`` lê estas linhas)."""
         confs = [float(w["conf"]) for w in words]
         _log.info(
-            'voz: frase="%s" confianca=%s palavras=%s aceita=%s pico=%.2f',
+            'voz: frase="%s" confianca=%s palavras=%s aceita=%s pico=%.2f vocabulario=%s',
             text,
             f"{min(confs):.2f}" if confs else "-",
             ",".join(f"{c:.2f}" for c in confs) or "-",
             "sim" if accepted else "nao",
             self._phrase_peak,
+            "sim" if known else "nao",
         )
 
     def poll(self) -> VoiceCommand | None:
@@ -143,8 +146,10 @@ class MicrophoneCommands:
         heard = self._heard
         if heard is None:
             return VoiceReception(self._level)
-        text, t, accepted, weakest = heard
-        return VoiceReception(self._level, text, t, accepted, weakest, self._min_confidence)
+        text, t, accepted, weakest, known = heard
+        return VoiceReception(
+            self._level, text, t, accepted, weakest, self._min_confidence, in_vocabulary=known
+        )
 
     def close(self) -> None:
         self._stop.set()
