@@ -152,6 +152,8 @@ O overlay mostra `Voz:` com o menu aberto (ou `ouvindo`) e uma barra com o níve
 
 Se fechar a tela manualmente, aperte `F8` para pausar o controlador, volte ao mundo do jogo e aperte `F8` de novo. O InMotion acompanha os comandos enviados e não lê a tela do Minecraft.
 
+Cada frase reconhecida também vai para o log, com a confiança de cada palavra e o pico de nível. Para escolher `voice.min_confidence` com dados, rode com `--log-file voz.log`, fale cada frase algumas vezes e resuma com `python -m tools.voice_report logs/voz.log`.
+
 Para escolher outro microfone, liste os dispositivos com `python -m sounddevice` e acrescente, por exemplo, `--set voice.device=2`. As frases e as teclas ficam em `voice` no arquivo `config/default.yaml` e podem ser sobrescritas no perfil do usuário.
 
 ### Opções da Linha de Comando

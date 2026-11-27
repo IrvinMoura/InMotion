@@ -25,6 +25,8 @@ As versões 0.1 e 0.2 foram reconstruídas a partir do histórico do git (não t
 
 - Indicador de recepção de voz no overlay: nível do microfone e a última frase ouvida, com
   a marcação de comando aceito ou ignorado e a confiança da palavra mais fraca.
+- Cada frase de voz reconhecida vai para o log (confiança por palavra e pico de nível) e
+  `tools.voice_report` resume o log por limiar de confiança.
 - Frases de voz: "abrir inventário", "abrir menu", "voltar", "pausar controle" e
   "continuar controle".
 

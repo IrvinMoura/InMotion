@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections import deque
 from contextlib import suppress
@@ -16,6 +17,7 @@ from inmotion.ports import Clock
 from inmotion.voice import VoiceCommand, VoiceConfig, VoiceReception, level_from_rms
 
 _MAX_AGE_S = 0.8
+_log = logging.getLogger(__name__)
 
 
 class MicrophoneCommands:
@@ -47,6 +49,7 @@ class MicrophoneCommands:
         self._stop = threading.Event()
         self._error: Exception | None = None
         self._level = 0.0  # escrito pela thread do áudio; leitura de um float é atômica
+        self._phrase_peak = 0.0  # maior nível desde a última frase fechada (só a thread do Vosk)
         self._heard: tuple[str, float, bool, float | None] | None = None
         self._worker = threading.Thread(target=self._listen, name="vosk", daemon=True)
         self._stream = audio.RawInputStream(
@@ -67,9 +70,7 @@ class MicrophoneCommands:
     def _capture(self, data: Any, frames: int, timing: Any, status: Any) -> None:
         # Um salto no contador faz o decodificador esquecer a frase interrompida.
         self._sequence += 2 if status else 1
-        samples = np.frombuffer(bytes(data), dtype=np.int16, count=len(data) // 2)
-        rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))) if samples.size else 0.0
-        self._level = level_from_rms(rms)
+        self._level = self._block_level(data)
         with suppress(Full):
             self._blocks.put_nowait((self._sequence, self._clock.now(), bytes(data)))
 
@@ -86,6 +87,7 @@ class MicrophoneCommands:
                 if sequence != previous + 1:
                     self._recognizer.Reset()
                 previous = sequence
+                self._phrase_peak = max(self._phrase_peak, self._block_level(data))
                 if self._recognizer.AcceptWaveform(data):
                     result = json.loads(self._recognizer.Result())
                     command = self._vocabulary.get(result.get("text", ""))
@@ -101,8 +103,31 @@ class MicrophoneCommands:
                     if text:
                         weakest = min((float(w["conf"]) for w in words), default=None)
                         self._heard = (text, t, accepted, weakest)
+                        self._log_phrase(text, words, accepted)
+                    self._phrase_peak = 0.0
         except Exception as exc:
             self._error = exc
+
+    @staticmethod
+    def _block_level(data: Any) -> float:
+        """Nível de um bloco int16 (``level_from_rms`` do RMS das amostras)."""
+        samples = np.frombuffer(bytes(data), dtype=np.int16, count=len(data) // 2)
+        if not samples.size:
+            return 0.0
+        return level_from_rms(float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))))
+
+    def _log_phrase(self, text: str, words: list[dict[str, Any]], accepted: bool) -> None:
+        """Uma linha por frase fechada, para calibrar ``min_confidence`` com dados
+        (``tools.voice_report`` lê estas linhas)."""
+        confs = [float(w["conf"]) for w in words]
+        _log.info(
+            'voz: frase="%s" confianca=%s palavras=%s aceita=%s pico=%.2f',
+            text,
+            f"{min(confs):.2f}" if confs else "-",
+            ",".join(f"{c:.2f}" for c in confs) or "-",
+            "sim" if accepted else "nao",
+            self._phrase_peak,
+        )
 
     def poll(self) -> VoiceCommand | None:
         if self._error is not None or not self._stream.active:

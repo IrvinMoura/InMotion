@@ -279,3 +279,45 @@ def test_reception_validates_confidence() -> None:
     for bad in (-0.1, 1.1, float("nan")):
         with pytest.raises(ValueError, match="confidence"):
             VoiceReception(0.5, "voltar", 1.0, True, bad, 0.9)
+
+
+def test_each_closed_phrase_is_logged_with_confidence_and_peak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Rodada de calibração (27/11): cada frase fechada vai para o log, aceita ou não."""
+    import logging
+
+    import numpy as np
+
+    loud = np.full(1600, 16384, dtype=np.int16).tobytes()
+    results = {
+        loud: {"text": "abrir menu", "result": [{"conf": 1.0}, {"conf": 0.97}]},
+        b"duvida": {"text": "voltar", "result": [{"conf": 0.62}]},
+        b"ruido": {"text": "[unk]", "result": [{"conf": 1.0}]},
+    }
+    source, stream, _, processed = _scripted_microphone(tmp_path, monkeypatch, results)
+
+    def deliver(block: bytes) -> None:
+        processed.clear()
+        stream.callback(block, 1600, None, False)
+        stream.callback(b"fim", 1600, None, False)
+        assert processed.wait(2)
+
+    caplog.set_level(logging.INFO, logger="inmotion.capture.microphone")
+    try:
+        deliver(loud)
+        deliver(b"duvida")
+        deliver(b"ruido")
+    finally:
+        source.close()
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("voz:")]
+    # Nos blocos falsos o texto vira amostras int16; o pico de uma frase é o maior nível
+    # desde a frase anterior (inclui o bloco "fim" que separa as frases).
+    level = microphone.MicrophoneCommands._block_level
+    peaks = [level(loud), max(level(b"fim"), level(b"duvida")), max(level(b"fim"), level(b"ruido"))]
+    assert lines == [
+        f'voz: frase="abrir menu" confianca=0.97 palavras=1.00,0.97 aceita=sim pico={peaks[0]:.2f}',
+        f'voz: frase="voltar" confianca=0.62 palavras=0.62 aceita=nao pico={peaks[1]:.2f}',
+        f'voz: frase="[unk]" confianca=1.00 palavras=1.00 aceita=nao pico={peaks[2]:.2f}',
+    ]
+    assert peaks[0] == pytest.approx(level_from_rms(16384.0))
