@@ -73,9 +73,17 @@ GitHub Actions   # CI em windows-latest (ruff, mypy, pytest)
 
 ### Pré-requisitos
 - Windows
-- Python 3.10
+- Python 3.10 (o `Instalar.bat` oferece instalar se faltar)
 - Webcam, com boa iluminação e ombros e quadris visíveis (testado a 1,5 m e 2 m)
-- Git (para clonagem)
+- Git (só para a instalação manual)
+
+### Instalação rápida (recomendada)
+
+1. Baixe o `.zip` da última versão em **Releases** (lado direito da página do GitHub) e descompacte numa pasta sua (por exemplo, `Documentos\InMotion`).
+2. Dê duplo clique em **`Instalar.bat`**. Ele procura o Python 3.10 (e oferece instalar pelo `winget` se faltar), cria o ambiente, instala as dependências com a voz, baixa o modelo de pose e o modelo de voz em português, confere tudo e oferece um atalho na área de trabalho. Leva alguns minutos e precisa de internet só nessa hora.
+3. Para jogar, dê duplo clique em **`InMotion.bat`** (ou no atalho).
+
+Pode rodar o `Instalar.bat` de novo a qualquer momento: o que já está pronto é pulado. O registro fica em `logs\instalar.log`.
 
 ### Instalação Passo-a-Passo
 
@@ -253,6 +261,7 @@ InMotion/
 │   ├── overlay.py / history.py → Janela de debug e histórico do gráfico
 │   ├── metrics.py          → Métricas por gesto (sessões guiadas)
 │   └── recording.py / recorder.py / replay.py → Gravação e replay
+├── Instalar.bat            → Instala tudo (duplo clique, uma vez)
 ├── InMotion.bat            → Abre o menu (duplo clique)
 ├── tools/                  → check_env, download_model, bench_pose, guided, record, replay, evaluate, traceability, simulate
 ├── tests/                  → Testes e fixtures de sessões .npz

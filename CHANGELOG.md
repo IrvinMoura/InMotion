@@ -30,6 +30,8 @@ As versões 0.1 e 0.2 foram reconstruídas a partir do histórico do git (não t
 - Frases de voz: "abrir inventário", "abrir menu", "voltar", "pausar controle" e
   "continuar controle".
 
+- Instalador `Instalar.bat`: Python 3.10, ambiente, dependências com voz, modelos de pose e
+  de voz, conferência e atalho na área de trabalho.
 - Menu inicial (`InMotion.bat`, duplo clique, sem terminal): escolhe câmera pela miniatura,
   microfone pelo nome com medidor de nível, perfil do jogo e mão dominante; volta ao menu ao
   sair do jogo e salva as escolhas.
