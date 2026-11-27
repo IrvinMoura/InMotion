@@ -101,6 +101,19 @@ python -m tools.check_env
 O arquivo `.task` é salvo em `models/` e não é versionado.
 
 ## Execução
+
+### Pelo menu (sem terminal)
+
+Depois de instalar, dê **duplo clique em `InMotion.bat`** na pasta do projeto. Abre um menu em que você escolhe:
+
+- **Câmera:** uma miniatura por câmera; clique na imagem em que você aparece (a escolhida aparece ao vivo embaixo).
+- **Perfil do jogo:** hoje, Minecraft. "Adicionar perfil" ainda não funciona (em breve).
+- **Microfone:** pelo nome, ou **Sem voz**. A barra mostra o nível enquanto você fala.
+- **Mão dominante:** destro ou canhoto.
+
+Clique em **Jogar**. No jogo, `F8` pausa e retoma e `F9` volta para o menu. As escolhas ficam salvas em `profiles/menu.yaml`, e o log de cada partida vai para `logs/menu.log`. O mesmo menu abre com `python -m inmotion.menu`.
+
+### Pelo terminal
 ```bash
 python -m inmotion --game minecraft
 ```
@@ -240,6 +253,7 @@ InMotion/
 │   ├── overlay.py / history.py → Janela de debug e histórico do gráfico
 │   ├── metrics.py          → Métricas por gesto (sessões guiadas)
 │   └── recording.py / recorder.py / replay.py → Gravação e replay
+├── InMotion.bat            → Abre o menu (duplo clique)
 ├── tools/                  → check_env, download_model, bench_pose, guided, record, replay, evaluate, traceability, simulate
 ├── tests/                  → Testes e fixtures de sessões .npz
 ├── pyproject.toml          → Ruff, pytest e mypy

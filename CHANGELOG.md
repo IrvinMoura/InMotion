@@ -30,6 +30,10 @@ As versões 0.1 e 0.2 foram reconstruídas a partir do histórico do git (não t
 - Frases de voz: "abrir inventário", "abrir menu", "voltar", "pausar controle" e
   "continuar controle".
 
+- Menu inicial (`InMotion.bat`, duplo clique, sem terminal): escolhe câmera pela miniatura,
+  microfone pelo nome com medidor de nível, perfil do jogo e mão dominante; volta ao menu ao
+  sair do jogo e salva as escolhas.
+
 ### Corrigido
 - Quem ligava o app perto da câmera e depois ia para o lugar ficava com a base do pulo e do
   agachar errada (agachar preso, pulo sem resposta). Agora, se a distância muda muito por 3 s,
