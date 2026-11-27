@@ -33,7 +33,7 @@ from inmotion.vision.geometry import (
     normalize_skeleton,
 )
 from inmotion.vision.landmarks import PoseLandmark, Side
-from inmotion.voice import VoiceCommand, VoiceConfig, apply_command
+from inmotion.voice import VoiceCommand, VoiceConfig, VoiceReception, apply_command
 
 # Ombros e quadris: sem eles visíveis a pose é fantasma/parcial e não conta como tracking.
 TORSO: tuple[int, ...] = (
@@ -80,6 +80,7 @@ class StepResult:
     gestures: tuple[GestureTelemetry, ...] = ()
     latency_ms: float | None = None  # spec 009: captura → fim do step (input já enviado)
     voice_status: str | None = None
+    voice: VoiceReception | None = None  # nível e última frase do microfone (só exibição)
 
 
 class Pipeline:

@@ -10,7 +10,13 @@ from inmotion.__main__ import build_parser, resolve_config
 from inmotion.capture import microphone
 from inmotion.config.validate import ConfigError
 from inmotion.safety import SafetyConfig, SafetyManager, SafetyState, TrackedInput
-from inmotion.voice import VoiceCommand, VoiceConfig, apply_command
+from inmotion.voice import (
+    VoiceCommand,
+    VoiceConfig,
+    VoiceReception,
+    apply_command,
+    level_from_rms,
+)
 from tests.fakes import FakeClock, FakeInputBackend
 
 
@@ -138,3 +144,117 @@ def test_audio_worker_only_delivers_recent_complete_commands(
     finally:
         source.close()
     assert not stream.active
+
+
+# --- Indicador de recepção de voz (27/11/2026) ---
+
+
+def test_level_from_rms_maps_dbfs_to_unit_range() -> None:
+    """dBFS = 20·log10(rms/32768); nível = (dBFS − piso)/(−piso), recortado em [0, 1]."""
+    assert level_from_rms(32768.0) == pytest.approx(1.0)
+    assert level_from_rms(32768.0 * 10 ** (-30 / 20)) == pytest.approx(0.5)  # −30 dBFS
+    assert level_from_rms(32768.0 * 10 ** (-60 / 20)) == pytest.approx(0.0)
+    assert level_from_rms(1.0) == 0.0  # abaixo do piso
+    assert level_from_rms(0.0) == 0.0
+    assert level_from_rms(float("nan")) == 0.0
+    assert level_from_rms(1e9) == 1.0
+
+
+def test_reception_validates_level() -> None:
+    assert VoiceReception(0.5).heard is None
+    for bad in (-0.1, 1.1, float("nan")):
+        with pytest.raises(ValueError, match="level"):
+            VoiceReception(bad)
+
+
+def _scripted_microphone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, results: dict[bytes, dict[str, Any]]
+) -> tuple[Any, Any, FakeClock, Event]:
+    """Microfone com Vosk e sounddevice falsos: cada bloco de ``results`` fecha uma frase."""
+    processed = Event()
+    clock = FakeClock()
+    opened: dict[str, Any] = {}
+
+    class Stream:
+        active = False
+
+        def __init__(self, **options: Any) -> None:
+            self.callback = options["callback"]
+            opened["stream"] = self
+
+        def start(self) -> None:
+            self.active = True
+
+        def close(self) -> None:
+            self.active = False
+
+    class Decoder:
+        block = b""
+
+        def SetWords(self, enabled: bool) -> None:  # noqa: N802
+            pass
+
+        def Reset(self) -> None:  # noqa: N802
+            pass
+
+        def AcceptWaveform(self, block: bytes) -> bool:  # noqa: N802
+            self.block = block
+            if block == b"fim":
+                processed.set()
+                return False
+            return block in results
+
+        def Result(self) -> str:  # noqa: N802
+            return json.dumps(results[self.block])
+
+    libs = {
+        "sounddevice": SimpleNamespace(
+            query_devices=lambda *args: {"default_samplerate": 16000}, RawInputStream=Stream
+        ),
+        "vosk": SimpleNamespace(
+            Model=lambda path: SimpleNamespace(vosk_model_find_word=lambda word: 0),
+            KaldiRecognizer=lambda *args: Decoder(),
+        ),
+    }
+    monkeypatch.setattr(microphone, "import_module", libs.__getitem__)
+    source = microphone.MicrophoneCommands(VoiceConfig(model_dir=tmp_path), clock)
+    return source, opened["stream"], clock, processed
+
+
+def test_reception_reports_level_and_last_phrase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import numpy as np
+
+    loud = np.full(1600, 16384, dtype=np.int16).tobytes()  # −6 dBFS
+    results = {
+        loud: {"text": "jogo menu", "result": [{"conf": 1.0}, {"conf": 1.0}]},
+        b"duvida": {"text": "jogo voltar", "result": [{"conf": 1.0}, {"conf": 0.5}]},
+        b"ruido": {"text": "[unk]", "result": [{"conf": 1.0}]},
+    }
+    source, stream, clock, processed = _scripted_microphone(tmp_path, monkeypatch, results)
+
+    def deliver(block: bytes) -> None:
+        processed.clear()
+        stream.callback(block, 1600, None, False)
+        stream.callback(b"fim", 1600, None, False)
+        assert processed.wait(2)
+
+    try:
+        assert source.reception() == VoiceReception(0.0)
+        stream.callback(loud, 1600, None, False)
+        assert source.reception().level == pytest.approx(level_from_rms(16384.0))
+        deliver(loud)
+        rec = source.reception()
+        assert (rec.heard, rec.heard_t, rec.accepted) == ("jogo menu", 0.0, True)
+        assert source.poll() is VoiceCommand.MENU
+        clock.advance(1.0)
+        deliver(b"duvida")  # frase do vocabulário com confiança baixa: ouvida, mas ignorada
+        rec = source.reception()
+        assert (rec.heard, rec.heard_t, rec.accepted) == ("jogo voltar", 1.0, False)
+        assert source.poll() is None
+        deliver(b"ruido")  # fora do vocabulário
+        assert source.reception().heard == "[unk]"
+        assert source.reception().accepted is False
+    finally:
+        source.close()

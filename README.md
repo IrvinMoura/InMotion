@@ -148,7 +148,7 @@ Para iniciar com o microfone padrão do Windows, use
 .\.venv\Scripts\python.exe -m inmotion --game minecraft --voice
 ```
 
-O overlay indica qual menu o InMotion abriu. Para testar, dê um passo até aparecer `W`, diga **jogo inventário** e confira se o personagem para. Diga **jogo voltar** e marche de novo. Repita com **jogo menu**. Com o inventário aberto, use o mouse físico para navegar.
+O overlay mostra `Voz:` com o menu aberto (ou `ouvindo`) e uma barra com o nível do microfone; se a barra não se mexe quando você fala, o InMotion está ouvindo o dispositivo errado. Logo abaixo aparece por 3 s a última frase reconhecida: verde quando virou comando, laranja quando foi ignorada (confiança baixa) e "frase desconhecida" quando não está no vocabulário. Para testar, dê um passo até aparecer `W`, diga **jogo inventário** e confira se o personagem para. Diga **jogo voltar** e marche de novo. Repita com **jogo menu**. Com o inventário aberto, use o mouse físico para navegar.
 
 Se fechar a tela manualmente, aperte `F8` para pausar o controlador, volte ao mundo do jogo e aperte `F8` de novo. O InMotion acompanha os comandos enviados e não lê a tela do Minecraft.
 

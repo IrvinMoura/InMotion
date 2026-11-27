@@ -238,6 +238,8 @@ def _run(deps: AppDeps, safety_config: SafetyConfig, max_frames: int | None = No
                     result = replace(pipeline.step(None, t), pose=pose, exit_zone=zone)
                 else:
                     result = replace(pipeline.step(pose, t, command), exit_zone=zone)
+                if deps.voice is not None:
+                    result = replace(result, voice=deps.voice.reception())
                 zone_inside = zone is not None and zone.inside
                 if packet is not None:  # spec 009 RF5: da captura ao input já enviado
                     result = replace(result, latency_ms=(deps.clock.now() - packet.t) * 1000.0)

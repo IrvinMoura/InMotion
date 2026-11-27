@@ -7,6 +7,7 @@ testes legados (elementos avançados só desenham quando presentes no ``StepResu
 from __future__ import annotations
 
 import math
+import unicodedata
 from enum import Enum
 
 import cv2
@@ -83,6 +84,16 @@ _POINT_RADIUS = 3
 _TEXT_ORIGIN_FPS = (8, 20)
 _TEXT_ORIGIN_STATE = (8, 42)
 _TEXT_ORIGIN_HAND = (8, 64)
+_TEXT_ORIGIN_VOICE = (8, 84)
+_TEXT_ORIGIN_HEARD = (8, 104)
+_VOICE_TEXT_SCALE = 0.5
+_VOICE_BAR_W, _VOICE_BAR_H = 90, 10
+_VOICE_BAR_GAP = 10
+_VOICE_BAR_COLOR = (80, 220, 120)
+_VOICE_FRAME_COLOR = (120, 120, 120)
+_HEARD_SHOW_S = 3.0  # quanto tempo a última frase fica na tela
+_HEARD_OK_COLOR = (80, 230, 80)
+_HEARD_IGNORED_COLOR = (0, 165, 255)
 _HAND_TEXT_SCALE = 0.5
 _HAND_COLOR = (255, 255, 0)
 _HAND_TEXT = {
@@ -381,6 +392,36 @@ def _draw_plot(out: NDArray[np.uint8], view: SeriesView, name: str | None) -> No
             cv2.polylines(out, [piece], False, color, 1, cv2.LINE_AA)
 
 
+def voice_heard_label(heard: str, *, accepted: bool) -> str:
+    """Texto da última frase ouvida, em ASCII (a fonte Hershey não desenha acentos)."""
+    if heard == "[unk]":
+        return "ouvi: frase desconhecida"
+    text = unicodedata.normalize("NFKD", heard).encode("ascii", "ignore").decode("ascii")
+    return f'ouvi: "{text}"' + ("" if accepted else " (ignorado)")
+
+
+def _draw_voice(out: NDArray[np.uint8], result: StepResult) -> None:
+    """Estado da voz, medidor de nível do microfone e a última frase (por ``_HEARD_SHOW_S``)."""
+    text = f"Voz: {result.voice_status}"
+    cv2.putText(out, text, _TEXT_ORIGIN_VOICE, _FONT, _VOICE_TEXT_SCALE, (255, 255, 255), 1)
+    rec = result.voice
+    if rec is None:
+        return
+    (text_w, _), _ = cv2.getTextSize(text, _FONT, _VOICE_TEXT_SCALE, 1)
+    x0 = _TEXT_ORIGIN_VOICE[0] + text_w + _VOICE_BAR_GAP
+    y1 = _TEXT_ORIGIN_VOICE[1]
+    y0 = y1 - _VOICE_BAR_H
+    fill = round(rec.level * _VOICE_BAR_W)
+    if fill > 0:
+        cv2.rectangle(out, (x0, y0), (x0 + fill, y1), _VOICE_BAR_COLOR, -1)
+    cv2.rectangle(out, (x0, y0), (x0 + _VOICE_BAR_W, y1), _VOICE_FRAME_COLOR, 1)
+    if rec.heard is None or rec.heard_t is None or result.t - rec.heard_t > _HEARD_SHOW_S:
+        return
+    color = _HEARD_OK_COLOR if rec.accepted else _HEARD_IGNORED_COLOR
+    label = voice_heard_label(rec.heard, accepted=rec.accepted)
+    cv2.putText(out, label, _TEXT_ORIGIN_HEARD, _FONT, _VOICE_TEXT_SCALE, color, 1)
+
+
 def handedness_label(handedness: str) -> str:
     """Texto do modo (spec 017 RF6): "Destro"/"Canhoto" e o braço que ataca (ASCII, Hershey)."""
     return _HAND_TEXT[handedness]
@@ -426,7 +467,7 @@ def render(
         text = handedness_label(handedness)
         cv2.putText(out, text, _TEXT_ORIGIN_HAND, _FONT, _HAND_TEXT_SCALE, _HAND_COLOR, 1)
     if result.voice_status is not None:
-        cv2.putText(out, f"Voz: {result.voice_status}", (8, 84), _FONT, 0.5, (255, 255, 255), 1)
+        _draw_voice(out, result)
     if not full:
         return out
     if result.normalized is not None:

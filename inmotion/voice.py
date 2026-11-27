@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import isfinite
+from math import isfinite, log10
 from pathlib import Path
 from typing import Protocol
 
@@ -51,8 +51,42 @@ class VoiceConfig:
             raise ValueError("inventory_key e menu_key devem ser teclas distintas")
 
 
+# Escala do medidor: 16 bits cheios = 0 dBFS; o piso de −60 dBFS fica abaixo de uma sala calma.
+FULL_SCALE = 32768.0
+LEVEL_FLOOR_DB = -60.0
+
+
+def level_from_rms(rms: float, floor_db: float = LEVEL_FLOOR_DB) -> float:
+    """Nível do medidor de voz: ``dBFS = 20·log10(rms/32768)`` levado de ``[piso, 0]`` a
+    ``[0, 1]``, ``nível = clip((dBFS − piso)/(−piso), 0, 1)``. Silêncio ou NaN dá 0."""
+    if not isfinite(rms) or rms <= 0.0:
+        return 0.0
+    dbfs = 20.0 * log10(rms / FULL_SCALE)
+    return min(1.0, max(0.0, (dbfs - floor_db) / -floor_db))
+
+
+@dataclass(frozen=True)
+class VoiceReception:
+    """O que o microfone recebe agora, para o indicador da janela (não decide nada).
+
+    ``level``: nível do último bloco de áudio, em ``[0, 1]`` (``level_from_rms``).
+    ``heard``: última frase fechada pelo reconhecedor (``"[unk]"`` = fora do vocabulário),
+    ``heard_t`` o instante dela e ``accepted`` se virou comando.
+    """
+
+    level: float
+    heard: str | None = None
+    heard_t: float | None = None
+    accepted: bool = False
+
+    def __post_init__(self) -> None:
+        if not (isfinite(self.level) and 0.0 <= self.level <= 1.0):
+            raise ValueError(f"level deve estar em [0, 1], recebido {self.level}")
+
+
 class VoiceSource(Protocol):
     def poll(self) -> VoiceCommand | None: ...
+    def reception(self) -> VoiceReception: ...
     def close(self) -> None: ...
 
 

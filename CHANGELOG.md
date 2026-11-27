@@ -23,6 +23,9 @@ As versões 0.1 e 0.2 foram reconstruídas a partir do histórico do git (não t
 ### Mudado
 - O ruff impede o núcleo de importar o overlay.
 
+- Indicador de recepção de voz no overlay: nível do microfone e a última frase ouvida, com
+  a marcação de comando aceito ou ignorado.
+
 ### Corrigido
 - Quem ligava o app perto da câmera e depois ia para o lugar ficava com a base do pulo e do
   agachar errada (agachar preso, pulo sem resposta). Agora, se a distância muda muito por 3 s,

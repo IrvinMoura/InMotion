@@ -13,7 +13,7 @@ from inmotion.filters.pose_filter import PoseFilter
 from inmotion.gestures.base import Direction, GestureKind, GestureParams
 from inmotion.safety import SafetyConfig
 from inmotion.types import FramePacket, PoseFrame
-from inmotion.voice import VoiceCommand
+from inmotion.voice import VoiceCommand, VoiceReception
 from tests.fakes import (
     FakeClock,
     FakeFrameSource,
@@ -114,6 +114,9 @@ def test_voice_menu_while_attacking_releases_then_rearms() -> None:
 
         def poll(self) -> VoiceCommand | None:
             return next(self.commands)
+
+        def reception(self) -> VoiceReception:
+            return VoiceReception(0.0)
 
         def close(self) -> None:
             self.closed = True
@@ -649,3 +652,40 @@ def test_latency_reaches_display() -> None:
     # A leitura avança DT e cada inferência soma 20 ms ao relógio, mas os quadros seguem
     # em i·DT: a latência cresce 20 ms por frame (a fila atrasa, como numa câmera lenta).
     assert latencies == pytest.approx([(DT + 0.02 * (i + 1)) * 1000.0 for i in range(3)])
+
+
+def test_voice_reception_reaches_the_display() -> None:
+    """Indicador de voz: a recepção do microfone de cada frame chega à janela."""
+
+    class ListeningVoice:
+        def __init__(self) -> None:
+            self.n = 0
+
+        def poll(self) -> VoiceCommand | None:
+            return None
+
+        def reception(self) -> VoiceReception:
+            self.n += 1
+            return VoiceReception(min(1.0, self.n / 10), "jogo menu", 0.05, True)
+
+        def close(self) -> None:
+            pass
+
+    clock = FakeClock()
+    display = _ResultSpyDisplay()
+    deps = make_deps(clock, ClockedSource(clock, 3), FakePoseEstimator([]), FakeInputBackend())
+    deps.display = display
+    deps.voice = ListeningVoice()
+    run(deps, NO_PERSISTENCE, max_frames=3)
+    voices = [r.voice for r in display.results]  # type: ignore[attr-defined]
+    assert [v.level for v in voices] == pytest.approx([0.1, 0.2, 0.3])
+    assert all(v.heard == "jogo menu" and v.accepted for v in voices)
+
+
+def test_without_voice_the_result_has_no_reception() -> None:
+    clock = FakeClock()
+    display = _ResultSpyDisplay()
+    deps = make_deps(clock, ClockedSource(clock, 2), FakePoseEstimator([]), FakeInputBackend())
+    deps.display = display
+    run(deps, NO_PERSISTENCE, max_frames=2)
+    assert all(r.voice is None for r in display.results)  # type: ignore[attr-defined]

@@ -10,8 +10,10 @@ from importlib import import_module
 from queue import Empty, Full, Queue
 from typing import Any
 
+import numpy as np
+
 from inmotion.ports import Clock
-from inmotion.voice import VoiceCommand, VoiceConfig
+from inmotion.voice import VoiceCommand, VoiceConfig, VoiceReception, level_from_rms
 
 _MAX_AGE_S = 0.8
 
@@ -44,6 +46,8 @@ class MicrophoneCommands:
         self._commands: deque[tuple[float, VoiceCommand]] = deque(maxlen=1)
         self._stop = threading.Event()
         self._error: Exception | None = None
+        self._level = 0.0  # escrito pela thread do áudio; leitura de um float é atômica
+        self._heard: tuple[str, float, bool] | None = None
         self._worker = threading.Thread(target=self._listen, name="vosk", daemon=True)
         self._stream = audio.RawInputStream(
             device=config.device,
@@ -63,6 +67,9 @@ class MicrophoneCommands:
     def _capture(self, data: Any, frames: int, timing: Any, status: Any) -> None:
         # Um salto no contador faz o decodificador esquecer a frase interrompida.
         self._sequence += 2 if status else 1
+        samples = np.frombuffer(bytes(data), dtype=np.int16, count=len(data) // 2)
+        rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))) if samples.size else 0.0
+        self._level = level_from_rms(rms)
         with suppress(Full):
             self._blocks.put_nowait((self._sequence, self._clock.now(), bytes(data)))
 
@@ -83,12 +90,16 @@ class MicrophoneCommands:
                     result = json.loads(self._recognizer.Result())
                     command = self._vocabulary.get(result.get("text", ""))
                     words = result.get("result", [])
-                    if (
+                    accepted = (
                         command is not None
-                        and words
+                        and bool(words)
                         and all(word["conf"] >= self._min_confidence for word in words)
-                    ):
+                    )
+                    if command is not None and accepted:
                         self._commands.append((t, command))
+                    text = result.get("text", "")
+                    if text:
+                        self._heard = (text, t, accepted)
         except Exception as exc:
             self._error = exc
 
@@ -100,6 +111,13 @@ class MicrophoneCommands:
         except IndexError:
             return None
         return command if self._clock.now() - t <= _MAX_AGE_S else None
+
+    def reception(self) -> VoiceReception:
+        """Nível do último bloco e a última frase fechada (para o indicador da janela)."""
+        heard = self._heard
+        if heard is None:
+            return VoiceReception(self._level)
+        return VoiceReception(self._level, heard[0], heard[1], heard[2])
 
     def close(self) -> None:
         self._stop.set()

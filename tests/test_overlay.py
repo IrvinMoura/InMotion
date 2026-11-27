@@ -342,3 +342,73 @@ def test_render_under_3ms() -> None:
     mean_ms = (time.perf_counter() - t0) / n * 1000.0
     print(f"overlay full: {mean_ms:.2f} ms/frame")
     assert mean_ms < 3.0
+
+
+# --- Indicador de recepção de voz (27/11/2026) ---
+
+VOICE_BAR = (slice(70, 90), slice(150, 260))  # à direita de "Voz: ouvindo", na linha y = 84
+VOICE_HEARD = (slice(92, 112), slice(0, 320))  # linha de baixo: a última frase
+
+
+def _voice_result(
+    level: float,
+    heard: str | None = None,
+    heard_t: float | None = None,
+    accepted: bool = False,
+    t: float = 10.0,
+) -> StepResult:
+    from inmotion.voice import VoiceReception
+
+    return StepResult(
+        t=t,
+        fps=30.0,
+        safety_state=SafetyState.ACTIVE,
+        pose=None,
+        voice_status="ouvindo",
+        voice=VoiceReception(level, heard, heard_t, accepted),
+    )
+
+
+def _black() -> np.ndarray:
+    return np.zeros((FULL_SIZE[1], FULL_SIZE[0], 3), dtype=np.uint8)
+
+
+def test_voice_meter_grows_with_the_level() -> None:
+    quiet = render(_black(), _voice_result(0.0))
+    half = render(_black(), _voice_result(0.5))
+    full = render(_black(), _voice_result(1.0))
+    assert quiet[VOICE_BAR].any()  # moldura da barra
+    filled = [int((img[VOICE_BAR].sum(axis=2) > 0).sum()) for img in (quiet, half, full)]
+    assert filled[0] < filled[1] < filled[2]
+
+
+def test_voice_shows_recent_phrase_and_hides_old_one() -> None:
+    from inmotion.overlay import OverlayLevel
+
+    heard = render(_black(), _voice_result(0.2, "jogo inventário", 9.0, True))
+    ignored = render(_black(), _voice_result(0.2, "jogo inventário", 9.0, False))
+    old = render(_black(), _voice_result(0.2, "jogo inventário", 1.0, True))
+    nothing = render(_black(), _voice_result(0.2))
+    assert heard[VOICE_HEARD].any()
+    assert not np.array_equal(heard[VOICE_HEARD], ignored[VOICE_HEARD])  # cor diferente
+    assert not old[VOICE_HEARD].any()
+    assert not nothing[VOICE_HEARD].any()
+    minimal = render(
+        _black(), _voice_result(0.2, "jogo menu", 9.0, True), level=OverlayLevel.MINIMAL
+    )
+    assert minimal[VOICE_HEARD].any()  # o indicador também aparece no nível minimal
+
+
+def test_no_voice_means_no_indicator() -> None:
+    res = StepResult(t=0.0, fps=30.0, safety_state=SafetyState.ACTIVE, pose=None)
+    out = render(_black(), res)
+    assert not out[VOICE_BAR].any()
+    assert not out[VOICE_HEARD].any()
+
+
+def test_voice_text_is_ascii() -> None:
+    from inmotion.overlay import voice_heard_label
+
+    assert voice_heard_label("jogo inventário", accepted=True) == 'ouvi: "jogo inventario"'
+    assert voice_heard_label("jogo menu", accepted=False) == 'ouvi: "jogo menu" (ignorado)'
+    assert voice_heard_label("[unk]", accepted=False) == "ouvi: frase desconhecida"
