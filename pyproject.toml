@@ -49,6 +49,7 @@ allowed-confusables = ["·", "×", "−", "α", "σ", "θ", "ε", "ν", "ρ", "�
 "inmotion/input/keyboard_mouse.py" = ["TID251"]
 "inmotion/input/gamepad.py" = ["TID251"]
 "inmotion/overlay.py" = ["TID251"]
+"inmotion/menu/**" = ["TID251"]  # spec 024: janela e dispositivos (composição)
 "inmotion/recorder.py" = ["TID251"]
 "tools/**" = ["TID251"]
 "tests/**" = ["TID251", "T20"]  # T20: testes de hardware imprimem medições
