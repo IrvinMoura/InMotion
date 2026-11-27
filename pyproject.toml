@@ -119,5 +119,5 @@ warn_unused_ignores = true
 
 # Bibliotecas sem stubs
 [[tool.mypy.overrides]]
-module = ["pydirectinput.*", "mediapipe.*"]
+module = ["pydirectinput.*", "mediapipe.*", "sounddevice.*"]
 ignore_missing_imports = true

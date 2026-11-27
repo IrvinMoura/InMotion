@@ -72,7 +72,6 @@ def test_reconcile_replaces_missing_devices_with_a_warning() -> None:
 # --- CA3: perfis de jogo ---
 
 
-@NOT_YET
 def test_game_profiles_come_from_the_games_folder(tmp_path: Path) -> None:
     (tmp_path / "minecraft.yaml").write_text("name: minecraft\nbindings: {}\n", encoding="utf-8")
     (tmp_path / "roblox.yaml").write_text("bindings: {}\n", encoding="utf-8")
@@ -83,7 +82,6 @@ def test_game_profiles_come_from_the_games_folder(tmp_path: Path) -> None:
     ]
 
 
-@NOT_YET
 def test_real_games_folder_has_minecraft() -> None:
     assert GameOption("minecraft", "Minecraft") in list_game_profiles()
 
@@ -91,7 +89,6 @@ def test_real_games_folder_has_minecraft() -> None:
 # --- Dispositivos (dublês das bibliotecas) ---
 
 
-@NOT_YET
 def test_microphones_are_listed_once_by_name_from_mme() -> None:
     devices = [
         {"name": "Mapeador de som da Microsoft - Input", "hostapi": 0, "max_input_channels": 2},
@@ -107,7 +104,6 @@ def test_microphones_are_listed_once_by_name_from_mme() -> None:
     ]
 
 
-@NOT_YET
 def test_probe_cameras_keeps_only_indices_that_deliver_a_frame() -> None:
     opened: list[Any] = []
 
